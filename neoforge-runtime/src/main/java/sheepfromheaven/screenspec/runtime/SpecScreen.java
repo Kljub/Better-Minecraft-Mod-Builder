@@ -4,6 +4,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
@@ -250,7 +251,14 @@ public class SpecScreen extends Screen implements ActionHost {
             if (w.type.equals("panel"))          renderPanel(graphics, w);
             else if (w.type.equals("sprite"))    renderSprite(graphics, w);
             else if (w.type.equals("progress"))  renderProgress(graphics, w);
+            else if (w.type.equals("xp_bar"))    renderXpBar(graphics, w);
+            else if (w.type.equals("heart_bar"))  renderHeartBar(graphics, w);
+            else if (w.type.equals("armor_bar"))  renderArmorBar(graphics, w);
+            else if (w.type.equals("hunger_bar")) renderHungerBar(graphics, w);
+            else if (w.type.equals("boss_bar"))   renderBossBar(graphics, w);
+            else if (w.type.equals("skill_check")) renderSkillCheck(graphics, w);
             else if (w.type.equals("custom"))    renderCustom(graphics, w);
+            else if (w.type.equals("player_preview")) renderPlayerPreview(graphics, w, mouseX, mouseY);
         }
         for (var renderable : renderables) {
             renderable.extractRenderState(graphics, mouseX, mouseY, partialTicks);
@@ -259,6 +267,7 @@ public class SpecScreen extends Screen implements ActionHost {
             if (w.type.equals("label"))     renderLabel(graphics, w);
             else if (w.type.equals("icon")) renderIcon(graphics, w);
             else if (w.type.equals("requirement")) renderRequirement(graphics, w);
+            else if (w.type.equals("button") || w.type.equals("toggle_button")) renderButtonIcon(graphics, w);
         }
     }
 
@@ -332,6 +341,64 @@ public class SpecScreen extends Screen implements ActionHost {
     }
 
     /**
+     * Draws an {@code xp_bar} widget: a flat-fill horizontal bar in vanilla experience-bar
+     * colors (no built-in label — place a {@code label} widget above it if you want to show
+     * the level number).
+     */
+    protected void renderXpBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderXpBar(new McDrawContext(graphics), w, origin[0], origin[1]);
+    }
+
+    /** Draws a {@code heart_bar} widget using real vanilla heart sprites. */
+    protected void renderHeartBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderHeartBar(new McDrawContext(graphics), this.font, w, origin[0], origin[1]);
+    }
+
+    /** Draws an {@code armor_bar} widget using real vanilla armor sprites. */
+    protected void renderArmorBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderArmorBar(new McDrawContext(graphics), this.font, w, origin[0], origin[1]);
+    }
+
+    /** Draws a {@code hunger_bar} widget using real vanilla food sprites. */
+    protected void renderHungerBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderHungerBar(new McDrawContext(graphics), this.font, w, origin[0], origin[1]);
+    }
+
+    /** Draws a {@code boss_bar} widget using real vanilla boss-bar sprites. */
+    protected void renderBossBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderBossBar(new McDrawContext(graphics), this.font, w, origin[0], origin[1]);
+    }
+
+    /** Draws a {@code skill_check} widget's sweeping dial. */
+    protected void renderSkillCheck(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderSkillCheck(new McDrawContext(graphics), this.font, w, origin[0], origin[1]);
+    }
+
+    /** Restarts a {@code skill_check} widget's sweep, e.g. to begin its next attempt. */
+    public void resetSkillCheck(String widgetId) {
+        renderer.resetSkillCheck(widgetId);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (super.keyPressed(event)) {
+            return true;
+        }
+        for (WidgetSpec w : builder().visibleWidgets()) {
+            if (renderer.handleSkillCheckKey(w, event.key(), this)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Draws an {@code icon} widget. No-op by default; override
      * {@link #resolveIcon} to map an icon id to your mod's texture.
      */
@@ -355,11 +422,26 @@ public class SpecScreen extends Screen implements ActionHost {
     }
 
     /**
+     * Draws a {@code button}/{@code toggle_button} widget's icon overlay, if its {@code icon} id
+     * resolves to something (see {@link #resolveIcon}). No-op by default.
+     */
+    protected void renderButtonIcon(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] origin = builder().originOf(w);
+        renderer.renderButtonIcon(new McDrawContext(graphics), w, origin[0], origin[1], this::resolveIcon);
+    }
+
+    /**
      * Draws a {@code custom} widget by delegating to its registered {@link CustomWidgetRenderer},
      * or a labeled placeholder if none is registered for its {@code customType}.
      */
     protected void renderCustom(GuiGraphicsExtractor graphics, WidgetSpec w) {
         int[] origin = builder().originOf(w);
         renderer.renderCustom(graphics, this.font, w, origin[0], origin[1]);
+    }
+
+    /** Draws a {@code player_preview} widget: the live local player model, eyes following the mouse. */
+    protected void renderPlayerPreview(GuiGraphicsExtractor graphics, WidgetSpec w, int mouseX, int mouseY) {
+        int[] origin = builder().originOf(w);
+        renderer.renderPlayerPreview(graphics, w, origin[0], origin[1], mouseX, mouseY);
     }
 }

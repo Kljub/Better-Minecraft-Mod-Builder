@@ -4,6 +4,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Inventory;
@@ -316,7 +317,14 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
             if (w.type.equals("panel"))          renderPanel(graphics, w);
             else if (w.type.equals("sprite"))    renderSprite(graphics, w);
             else if (w.type.equals("progress"))  renderProgress(graphics, w);
+            else if (w.type.equals("xp_bar"))    renderXpBar(graphics, w);
+            else if (w.type.equals("heart_bar"))  renderHeartBar(graphics, w);
+            else if (w.type.equals("armor_bar"))  renderArmorBar(graphics, w);
+            else if (w.type.equals("hunger_bar")) renderHungerBar(graphics, w);
+            else if (w.type.equals("boss_bar"))   renderBossBar(graphics, w);
+            else if (w.type.equals("skill_check")) renderSkillCheck(graphics, w);
             else if (w.type.equals("custom"))    renderCustom(graphics, w);
+            else if (w.type.equals("player_preview")) renderPlayerPreview(graphics, w, mouseX, mouseY);
         }
         for (SlotAreaSpec area : this.containerSpec.slots) {
             if (isAreaVisible(area.id)) drawSlotGrid(graphics, area);
@@ -346,6 +354,7 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
             if (w.type.equals("label"))     renderer.renderLabel(new McDrawContext(graphics), this.font, w, rx, ry);
             else if (w.type.equals("icon")) renderer.renderIcon(new McDrawContext(graphics), w, rx, ry, this::resolveIcon);
             else if (w.type.equals("requirement")) renderer.renderRequirement(new McDrawContext(graphics), w, rx, ry, this::resolveIcon);
+            else if (w.type.equals("button") || w.type.equals("toggle_button")) renderer.renderButtonIcon(new McDrawContext(graphics), w, rx, ry, this::resolveIcon);
         }
     }
 
@@ -416,6 +425,60 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
         renderer.renderProgress(new McDrawContext(graphics), this.font, w, o[0], o[1]);
     }
 
+    /** Draws an {@code xp_bar} widget using the real vanilla experience-bar sprites. */
+    protected void renderXpBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderXpBar(new McDrawContext(graphics), w, o[0], o[1]);
+    }
+
+    /** Draws a {@code heart_bar} widget using real vanilla heart sprites. */
+    protected void renderHeartBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderHeartBar(new McDrawContext(graphics), this.font, w, o[0], o[1]);
+    }
+
+    /** Draws an {@code armor_bar} widget using real vanilla armor sprites. */
+    protected void renderArmorBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderArmorBar(new McDrawContext(graphics), this.font, w, o[0], o[1]);
+    }
+
+    /** Draws a {@code hunger_bar} widget using real vanilla food sprites. */
+    protected void renderHungerBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderHungerBar(new McDrawContext(graphics), this.font, w, o[0], o[1]);
+    }
+
+    /** Draws a {@code boss_bar} widget using real vanilla boss-bar sprites. */
+    protected void renderBossBar(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderBossBar(new McDrawContext(graphics), this.font, w, o[0], o[1]);
+    }
+
+    /** Draws a {@code skill_check} widget's sweeping dial. */
+    protected void renderSkillCheck(GuiGraphicsExtractor graphics, WidgetSpec w) {
+        int[] o = builder().originOf(w);
+        renderer.renderSkillCheck(new McDrawContext(graphics), this.font, w, o[0], o[1]);
+    }
+
+    /** Restarts a {@code skill_check} widget's sweep, e.g. to begin its next attempt. */
+    public void resetSkillCheck(String widgetId) {
+        renderer.resetSkillCheck(widgetId);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (super.keyPressed(event)) {
+            return true;
+        }
+        for (WidgetSpec w : builder().visibleWidgets()) {
+            if (renderer.handleSkillCheckKey(w, event.key(), this)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     protected void renderLabel(GuiGraphicsExtractor graphics, WidgetSpec w) {
         int[] o = builder().originOf(w);
         renderer.renderLabel(new McDrawContext(graphics), this.font, w, o[0], o[1]);
@@ -438,5 +501,11 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
     protected void renderCustom(GuiGraphicsExtractor graphics, WidgetSpec w) {
         int[] o = builder().originOf(w);
         renderer.renderCustom(graphics, this.font, w, o[0], o[1]);
+    }
+
+    /** Draws a {@code player_preview} widget: the live local player model, eyes following the mouse. */
+    protected void renderPlayerPreview(GuiGraphicsExtractor graphics, WidgetSpec w, int mouseX, int mouseY) {
+        int[] o = builder().originOf(w);
+        renderer.renderPlayerPreview(graphics, w, o[0], o[1], mouseX, mouseY);
     }
 }

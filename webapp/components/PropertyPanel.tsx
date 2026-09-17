@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { WidgetSpec, BindingsSchema } from "@/lib/types";
 import { getWidgetDef } from "@/lib/widgetRegistry";
 import { getBindingNode, getPathsByType } from "@/components/BindingsTree";
@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Field, NumInput, Toggle, PropSelect } from "@/components/SchemaFields";
 import { AlignLeft, AlignCenter, AlignRight } from "lucide-react";
 
 const BINDING_TARGETS: Record<string, string[]> = {
@@ -63,7 +64,7 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
     );
   }
 
-  const { packTextures } = useTextures();
+  const { packTextures, uploadCustomTexture } = useTextures();
   const [texPickerOpen, setTexPickerOpen] = useState(false);
   const def = getWidgetDef(widget.type);
 
@@ -132,11 +133,8 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
         </Field>
       )}
 
-      {widget.type === "requirement" && (
+      {(widget.type === "requirement" || widget.type === "button" || widget.type === "toggle_button") && (
         <Field label="Icon">
-          {Object.keys(packTextures).length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">Extract a resource pack first</p>
-          ) : (
             <div className="flex flex-col gap-1">
               <button
                 title="Change icon"
@@ -156,16 +154,27 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
                   <span className="flex items-center justify-center py-4 text-xs text-muted-foreground">Pick icon…</span>
                 )}
               </button>
-              {widget.icon && <p className="text-[10px] text-muted-foreground truncate">{widget.icon}</p>}
+              {widget.icon && (
+                <div className="flex items-center gap-1">
+                  <p className="flex-1 min-w-0 text-[10px] text-muted-foreground truncate">{widget.icon}</p>
+                  <button
+                    title="Remove icon"
+                    onClick={() => set({ icon: null })}
+                    className="shrink-0 text-[10px] text-muted-foreground hover:text-destructive px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
               <TexturePickerModal
                 open={texPickerOpen}
                 packTextures={packTextures}
                 current={widget.icon ?? ""}
                 onSelect={(k) => { set({ icon: k }); setTexPickerOpen(false); }}
                 onClose={() => setTexPickerOpen(false)}
+                onUpload={uploadCustomTexture}
               />
             </div>
-          )}
         </Field>
       )}
 
@@ -218,12 +227,8 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
 
               // Sprite texture picker
               if (widget.type === "sprite" && field.key === "src") {
-                const hasPackTextures = Object.keys(packTextures).length > 0;
                 return (
                   <Field key={field.key} label={field.label}>
-                    {!hasPackTextures ? (
-                      <p className="text-xs text-muted-foreground italic">Extract a resource pack first</p>
-                    ) : (
                       <div className="flex flex-col gap-1">
                         <button
                           title="Change texture"
@@ -266,27 +271,21 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
                             }
                           }}
                           onClose={() => setTexPickerOpen(false)}
+                          onUpload={uploadCustomTexture}
                         />
                       </div>
-                    )}
                   </Field>
                 );
               }
 
-              // Color picker
-              if (field.key === "color" || field.key === "color_met" || field.key === "color_unmet") {
+              // Color picker — only for numeric ARGB color props. A "color"-named field can also
+              // be a select of preset names (e.g. boss_bar's pink/blue/...), which must fall
+              // through to the generic select-dropdown branch below instead.
+              if (field.type !== "select" && (field.key === "color" || field.key === "color_met" || field.key === "color_unmet")) {
                 const colorInt = parseInt(currentValue, 10) || 0;
                 return (
                   <Field key={field.key} label={field.label}>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="color"
-                        value={argbIntToHex(colorInt)}
-                        onChange={(e) => setProp(field.key, String(hexToArgbInt(e.target.value)))}
-                        className="h-6 w-8 cursor-pointer rounded border border-input bg-transparent p-0.5"
-                      />
-                      <span className="text-[10px] text-muted-foreground">{argbIntToHex(colorInt)}</span>
-                    </div>
+                    <ColorField value={colorInt} onChange={(v) => setProp(field.key, String(v))} />
                   </Field>
                 );
               }
@@ -440,46 +439,38 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <label className="text-muted-foreground">{label}</label>
-      {children}
-    </div>
-  );
-}
+// Native <input type="color"> fires React's onChange on every intermediate value while
+// dragging inside the picker (it maps onChange to the DOM "input" event, not "change") — that's
+// dozens of events per drag. Committing straight to onChange means dozens of full history pushes
+// + app re-renders per drag, which is what made this feel slow. Track the swatch locally for
+// instant visual feedback and debounce the actual commit so dragging only produces one commit
+// once it pauses (plus a final flush on blur, in case the user tabs away mid-drag).
+function ColorField({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [hex, setHex] = useState(() => argbIntToHex(value));
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-function NumInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <Input
-      className="h-6 text-xs px-1.5"
-      type="number"
-      value={value}
-      onChange={(e) => {
-        const v = parseInt(e.target.value, 10);
-        if (!isNaN(v)) onChange(v);
-      }}
-    />
-  );
-}
+  useEffect(() => { setHex(argbIntToHex(value)); }, [value]);
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className={`relative h-4 w-7 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-        checked ? "bg-primary" : "bg-input"
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
-          checked ? "translate-x-3" : "translate-x-0"
-        }`}
+    <div className="flex items-center gap-1.5">
+      <input
+        type="color"
+        value={hex}
+        onChange={(e) => {
+          const h = e.target.value;
+          setHex(h);
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          timeoutRef.current = setTimeout(() => onChange(hexToArgbInt(h)), 150);
+        }}
+        onBlur={() => {
+          if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+          onChange(hexToArgbInt(hex));
+        }}
+        className="h-6 w-8 cursor-pointer rounded border border-input bg-transparent p-0.5"
       />
-    </button>
+      <span className="text-[10px] text-muted-foreground">{hex}</span>
+    </div>
   );
 }
 
@@ -547,36 +538,6 @@ function ActionSelect({
             + Create new action…
           </SelectItem>
         )}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function PropSelect({
-  value,
-  options,
-  labels = {},
-  onChange,
-  extraOptions = [],
-}: {
-  value: string;
-  options: string[];
-  labels?: Record<string, string>;
-  onChange: (v: string) => void;
-  extraOptions?: string[];
-}) {
-  const allOptions = [...new Set([...options, ...extraOptions])];
-  return (
-    <Select value={value} onValueChange={(v) => onChange(v ?? "")}>
-      <SelectTrigger size="sm" className="w-full h-6 text-xs">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {allOptions.map((opt) => (
-          <SelectItem key={opt} value={opt} className="text-xs py-0.5">
-            {(labels[opt] ?? opt) || <span className="text-muted-foreground">(none)</span>}
-          </SelectItem>
-        ))}
       </SelectContent>
     </Select>
   );

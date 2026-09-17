@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3 } from "lucide-react";
+import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical } from "lucide-react";
 import Link from "next/link";
 import type { ScreenSpec, BindingsSchema } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,9 @@ interface Props {
   snapToSiblings: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  hasSelection: boolean;
+  onCenterHorizontal: () => void;
+  onCenterVertical: () => void;
   tryMode: boolean;
   scale: number;
   onZoomIn: () => void;
@@ -47,7 +50,7 @@ interface Props {
 }
 
 export default function Toolbar({
-  screen, gridSize, showGrid, snapToParent, snapToSiblings, canUndo, canRedo, tryMode,
+  screen, gridSize, showGrid, snapToParent, snapToSiblings, canUndo, canRedo, hasSelection, onCenterHorizontal, onCenterVertical, tryMode,
   onUndo, onRedo, onGridSizeChange, onToggleGrid, onToggleSnapToParent, onToggleSnapToSiblings, onToggleTryMode,
   onScreenChange, onExportProject, onImportProject, onCopyJava, onResetTextures, onViewTextures, onExtractPack,
   scale, onZoomIn, onZoomOut, onZoomReset, onSaveToTestMod,
@@ -121,6 +124,15 @@ export default function Toolbar({
 
       <Button variant="outline" size="sm" className="h-8" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">↩ Undo</Button>
       <Button variant="outline" size="sm" className="h-8" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)">↪ Redo</Button>
+
+      <Separator orientation="vertical" className="h-5" />
+
+      <Button variant="outline" size="sm" className="h-8 w-8 px-0" onClick={onCenterHorizontal} disabled={!hasSelection} title="Center selection horizontally">
+        <AlignCenterHorizontal className="h-4 w-4" />
+      </Button>
+      <Button variant="outline" size="sm" className="h-8 w-8 px-0" onClick={onCenterVertical} disabled={!hasSelection} title="Center selection vertically">
+        <AlignCenterVertical className="h-4 w-4" />
+      </Button>
 
       <Separator orientation="vertical" className="h-5" />
 

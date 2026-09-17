@@ -18,5 +18,21 @@ interface DrawContext {
     /** Blits a full texture scaled to the given size (for icons and sprites). */
     void blitIcon(Identifier tex, int x, int y, int w, int h);
 
+    /** Blits a vanilla GUI atlas sprite (resolved by id, e.g. {@code "hud/armor_full"}) at its natural size. */
+    void blitSprite(Identifier spriteId, int x, int y, int w, int h);
+
+    /**
+     * Blits the left {@code destW}×{@code destH} portion of a {@code spriteW}×{@code spriteH}
+     * vanilla GUI atlas sprite — the partial-fill technique vanilla uses for its own xp bar and
+     * boss bar progress overlays.
+     */
+    void blitSpritePartial(Identifier spriteId, int spriteW, int spriteH, int x, int y, int destW, int destH);
+
     void drawText(Font font, String text, int x, int y, int color, boolean shadow);
+
+    /** Rotates subsequent draw calls by {@code degrees} clockwise around {@code (centerX, centerY)}, until {@link #popRotation}. */
+    void pushRotation(int centerX, int centerY, int degrees);
+
+    /** Ends the transform started by the matching {@link #pushRotation}. */
+    void popRotation();
 }

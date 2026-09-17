@@ -2,8 +2,8 @@ import type { ScreenSpec } from "./types";
 
 const SAMPLE_SCREEN: ScreenSpec = {
   id: "new_screen",
-  width: 320,
-  height: 180,
+  width: 350,
+  height: 200,
   widgets: [],
 };
 

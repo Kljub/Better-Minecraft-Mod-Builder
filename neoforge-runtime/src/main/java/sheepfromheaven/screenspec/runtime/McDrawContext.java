@@ -29,7 +29,30 @@ final class McDrawContext implements DrawContext {
     }
 
     @Override
+    public void blitSprite(Identifier spriteId, int x, int y, int w, int h) {
+        g.blitSprite(RenderPipelines.GUI_TEXTURED, spriteId, x, y, w, h);
+    }
+
+    @Override
+    public void blitSpritePartial(Identifier spriteId, int spriteW, int spriteH, int x, int y, int destW, int destH) {
+        g.blitSprite(RenderPipelines.GUI_TEXTURED, spriteId, spriteW, spriteH, 0, 0, x, y, destW, destH);
+    }
+
+    @Override
     public void drawText(Font font, String text, int x, int y, int color, boolean shadow) {
         g.text(font, text, x, y, color, shadow);
+    }
+
+    @Override
+    public void pushRotation(int centerX, int centerY, int degrees) {
+        g.pose().pushMatrix();
+        g.pose().translate(centerX, centerY);
+        g.pose().rotate((float) Math.toRadians(degrees));
+        g.pose().translate(-centerX, -centerY);
+    }
+
+    @Override
+    public void popRotation() {
+        g.pose().popMatrix();
     }
 }

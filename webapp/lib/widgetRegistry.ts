@@ -169,6 +169,96 @@ const WIDGET_REGISTRY: WidgetDef[] = [
     ],
   },
   {
+    type: "xp_bar",
+    label: "XP Bar",
+    defaultWidget: {
+      type: "xp_bar",
+      x: 8, y: 8, w: 182, h: 5,
+      text: "", icon: null,
+      props: { value: "35" },
+    },
+    propSchema: [
+      { key: "value", label: "Progress % (to next level)", type: "number", defaultValue: "35" },
+    ],
+  },
+  {
+    type: "heart_bar",
+    label: "Heart Bar",
+    defaultWidget: {
+      type: "heart_bar",
+      x: 8, y: 8, w: 81, h: 9,
+      text: "", icon: null,
+      props: { value: "20", max: "20", color: "red", rotation: "0" },
+    },
+    propSchema: [
+      { key: "value", label: "Current HP (2 per heart)", type: "number", defaultValue: "20" },
+      { key: "max", label: "Max HP (2 per heart)", type: "number", defaultValue: "20" },
+      { key: "color", label: "Color", type: "select", options: ["red", "gold", "black"], defaultValue: "red" },
+      { key: "rotation", label: "Rotation", type: "select", options: ["0", "90", "180", "270"], defaultValue: "0" },
+    ],
+  },
+  {
+    type: "armor_bar",
+    label: "Armor Bar",
+    defaultWidget: {
+      type: "armor_bar",
+      x: 8, y: 8, w: 81, h: 9,
+      text: "", icon: null,
+      props: { value: "10", max: "20" },
+    },
+    propSchema: [
+      { key: "value", label: "Armor Points", type: "number", defaultValue: "10" },
+      { key: "max", label: "Max Armor Points", type: "number", defaultValue: "20" },
+    ],
+  },
+  {
+    type: "hunger_bar",
+    label: "Hunger Bar",
+    defaultWidget: {
+      type: "hunger_bar",
+      x: 8, y: 8, w: 81, h: 9,
+      text: "", icon: null,
+      props: { value: "20", max: "20" },
+    },
+    propSchema: [
+      { key: "value", label: "Hunger Points (2 per icon)", type: "number", defaultValue: "20" },
+      { key: "max", label: "Max Hunger Points", type: "number", defaultValue: "20" },
+    ],
+  },
+  {
+    type: "skill_check",
+    label: "Skill Check",
+    defaultWidget: {
+      type: "skill_check",
+      x: 8, y: 8, w: 60, h: 60,
+      text: "SPACE", icon: null,
+      props: { key: "space", duration_ticks: "40", bonus_start: "300", bonus_end: "330", normal_start: "240", normal_end: "300" },
+    },
+    propSchema: [
+      { key: "key", label: "Trigger Key", type: "select", options: ["space", "enter", "a", "b", "c", "d", "e", "f", "q", "r", "s", "w"], defaultValue: "space" },
+      { key: "duration_ticks", label: "Sweep Duration (ticks, 20=1s)", type: "number", defaultValue: "40" },
+      { key: "bonus_start", label: "Bonus Zone Start (deg, 0=top, clockwise)", type: "number", defaultValue: "300" },
+      { key: "bonus_end", label: "Bonus Zone End (deg)", type: "number", defaultValue: "330" },
+      { key: "normal_start", label: "Normal Zone Start (deg)", type: "number", defaultValue: "240" },
+      { key: "normal_end", label: "Normal Zone End (deg)", type: "number", defaultValue: "300" },
+    ],
+  },
+  {
+    type: "boss_bar",
+    label: "Boss Bar",
+    defaultWidget: {
+      type: "boss_bar",
+      x: 8, y: 8, w: 182, h: 5,
+      text: "Boss", icon: null,
+      props: { value: "70", color: "pink", rotation: "0" },
+    },
+    propSchema: [
+      { key: "value", label: "Progress %", type: "number", defaultValue: "70" },
+      { key: "color", label: "Color", type: "select", options: ["pink", "blue", "red", "green", "yellow", "purple", "white"], defaultValue: "pink" },
+      { key: "rotation", label: "Rotation", type: "select", options: ["0", "90", "180", "270"], defaultValue: "0" },
+    ],
+  },
+  {
     type: "requirement",
     label: "Requirement",
     defaultWidget: {
@@ -181,6 +271,19 @@ const WIDGET_REGISTRY: WidgetDef[] = [
       { key: "color_met", label: "Color (Met)", type: "number", defaultValue: "65280" },
       { key: "color_unmet", label: "Color (Unmet)", type: "number", defaultValue: "16711680" },
       { key: "border_width", label: "Border Width", type: "number", defaultValue: "2" },
+    ],
+  },
+  {
+    type: "player_preview",
+    label: "Player Preview",
+    defaultWidget: {
+      type: "player_preview",
+      x: 8, y: 8, w: 51, h: 70,
+      text: "", icon: null,
+      props: { scale: "30" },
+    },
+    propSchema: [
+      { key: "scale", label: "Scale", type: "number", defaultValue: "30" },
     ],
   },
   {

@@ -8,16 +8,16 @@ version = "${file.jarVersion}"
 displayName = "ScreenSpec"
 description = "Runtime library for ScreenSpec JSON screens exported by the MC Screen Designer."
 
+# side left unspecified (defaults to BOTH): item/block auto-registration (ScreenSpecMod) must run
+# on a dedicated server too, not just the client-only screen-rendering half of this library.
 [[dependencies.screenspec]]
     modId = "neoforge"
     type = "required"
     versionRange = "[21,)"
     ordering = "NONE"
-    side = "CLIENT"
 
 [[dependencies.screenspec]]
     modId = "minecraft"
     type = "required"
     versionRange = "[1.21,)"
     ordering = "NONE"
-    side = "CLIENT"

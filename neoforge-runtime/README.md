@@ -21,8 +21,9 @@ into a real, working `Screen` — no codegen, no hand-laid-out widgets.
 6. [Widget props reference](#widget-props-reference)
 7. [Extending and customising](#extending-and-customising)
 8. [Tabs (creative-menu-style)](#tabs-creative-menu-style)
-9. [Known limitations](#known-limitations)
-10. [Building locally](#building-locally)
+9. [Items and Blocks](#items-and-blocks)
+10. [Known limitations](#known-limitations)
+11. [Building locally](#building-locally)
 
 ---
 
@@ -537,6 +538,139 @@ public class SettingsScreen extends SpecScreen {
 ```
 
 `SpecContainerScreen` does not support tabs.
+
+---
+
+## Items and Blocks
+
+Beyond screens, the [MC Screen Designer](https://minecraft-mod-ui-builder.vercel.app/) web tool
+can also export **Items** and **Blocks** — declarative properties only (name, texture, stack size,
+rarity, durability, attribute modifiers, hardness, sound, ...), not a scripted power/ability
+system. Exporting a project produces `assets/<modid>/screenspec/items.json` and `.../blocks.json`
+manifests (each a JSON array) alongside generated model/blockstate JSON and the referenced
+textures — extract the zip straight into your mod's `src/main/resources/`.
+
+**No Java code required.** `ScreenSpecMod` (this library's own `@Mod` entry point) auto-discovers,
+at mod-construction time, every loaded mod that ships an `items.json`/`blocks.json` manifest and
+registers the items/blocks for you via `ModContent`. A mod using the web tool only needs to depend
+on this library and drop the exported files into its resources — same workflow as a screen, just
+without a keybind to trigger it.
+
+### ItemSpec fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | registry name |
+| `displayName` | string | shown literally (no lang file) |
+| `texture` | string | pack texture key the web tool used |
+| `category` | `"simple"` \| `"food"` \| `"armor"` | |
+| `stackSize` | number | forced to 1 if `durability > 0` |
+| `rarity` | `"common"` \| `"uncommon"` \| `"rare"` \| `"epic"` | |
+| `fireResistant` | boolean | |
+| `durability` | number | `0` = not damageable |
+| `nutrition`, `saturation`, `alwaysEdible` | — | only when `category == "food"` |
+| `armorSlot` | `"helmet"` \| `"chestplate"` \| `"leggings"` \| `"boots"` | only when `category == "armor"` — sets the `Equippable` component |
+| `attributes` | `AttributeModifierSpec[]` | declarative stat modifiers — vanilla's data-driven `AttributeModifiers` item component, not scripted behavior |
+| `creativeTab` | vanilla tab key, `"custom"`, or a project-defined tab id | see below |
+
+`AttributeModifierSpec` is `{ attribute, amount, operation, slot }`:
+- `attribute`: `generic.max_health`, `generic.attack_damage`, `generic.attack_speed`,
+  `generic.armor`, `generic.armor_toughness`, `generic.movement_speed`,
+  `generic.knockback_resistance`, or `generic.luck`.
+- `operation`: `add_value` | `add_multiplied_base` | `add_multiplied_total` (vanilla's
+  `AttributeModifier.Operation`).
+- `slot`: a vanilla `EquipmentSlotGroup` key — `any`, `hand`, `mainhand`, `offhand`, `armor`,
+  `head`, `chest`, `legs`, `feet`, or `body`.
+
+Switching an item to `category: "armor"` in the web tool seeds one default `generic.armor`
+modifier for the chosen slot; armor's actual defense/toughness/knockback-resistance are just
+`attributes` entries like any other, not a separate stat system.
+
+### BlockSpec fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | registry name |
+| `displayName` | string | shown literally |
+| `texture` | string | single texture applied to all 6 faces (`cube_all`) |
+| `hardness`, `resistance` | number | `BlockBehaviour.Properties.strength(...)` |
+| `requiresTool` | boolean | |
+| `luminance` | number | 0-15 |
+| `soundType` | `"stone"` \| `"wood"` \| `"metal"` \| `"gravel"` \| `"grass"` \| `"glass"` \| `"wool"` \| `"sand"` | |
+| `hasItem` | boolean | also registers a plain `BlockItem` |
+| `creativeTab` | vanilla tab key, `"custom"`, or a project-defined tab id | applies to the `BlockItem` |
+
+### Custom Attributes
+
+Beyond the curated vanilla attributes an item's `attributes` list already offers, a project can
+define its own global attributes (the web tool's "Custom Attributes" sidebar section) —
+`CustomAttributeSpec`:
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | registry name, e.g. `"mana"` — referenceable from any item's `AttributeModifierSpec.attribute` |
+| `displayName` | string | |
+| `defaultBase`, `min`, `max` | number | `RangedAttribute(descriptionId, defaultBase, min, max)` |
+| `sentiment` | `"positive"` \| `"neutral"` \| `"negative"` | tooltip color — vanilla's `Attribute.Sentiment` |
+| `addToAllLiving` | boolean | adds the attribute (at `defaultBase`) to every living entity type via `EntityAttributeModificationEvent` |
+| `addToPlayers` | boolean | same, but only `EntityTypes.PLAYER` — independent of `addToAllLiving` |
+
+Registered via `assets/<modid>/screenspec/attributes.json` (same auto-discovery as items/blocks —
+see `CustomAttributeSpec.java`/`CustomAttributeSpecLoader`/`CustomAttributeSpecs` in the
+`sheepfromheaven.screenspec.runtime.attribute` package). Custom attributes are registered *before*
+items, so an `ItemSpec.attributes` entry can reference either a vanilla key or a project-defined
+custom attribute id interchangeably.
+
+### Creative tabs
+
+`creativeTab` is one of:
+- a vanilla tab key (`BUILDING_BLOCKS`, `COLORED_BLOCKS`, `NATURAL_BLOCKS`, `FUNCTIONAL_BLOCKS`,
+  `REDSTONE_BLOCKS`, `TOOLS_AND_UTILITIES`, `COMBAT`, `FOOD_AND_DRINKS`, `INGREDIENTS`,
+  `SPAWN_EGGS`) — the item/block is added to that existing vanilla tab via
+  `BuildCreativeModeTabContentsEvent`;
+- `"custom"` (the default) — one tab shared by every item/block in the project that uses it,
+  titled after `modId`;
+- any other string — a project-defined named tab (the web tool's "Creative Tabs" sidebar section)
+  gets its own `DeferredRegister<CreativeModeTab>` entry, titled after that id, icon = its first
+  item/block.
+
+### Effects and Potions
+
+`EffectSpec` (a `MobEffect`) has `id`, `displayName`, `category` (`"beneficial"` | `"harmful"` |
+`"neutral"`, vanilla's `MobEffectCategory`), `color` (hex, particle/swirl color), and `attributes`
+— the *same* `AttributeModifierSpec[]` mechanism as `ItemSpec.attributes`, applied while the effect
+is active and scaled per amplifier level by vanilla automatically (not a scripted power system).
+Registered as an anonymous `MobEffect` subclass (its constructor is `protected` in this MC version
+— no public `Builder`).
+
+`PotionSpec` is a named bundle of effect instances — `effects: { effectId, durationSeconds,
+amplifier }[]`, where `effectId` is a fully-qualified vanilla id (`"minecraft:speed"`) or a
+project `EffectSpec`'s bare id. Registers the `Potion` definition itself (so it exists and can be
+referenced, e.g. via commands); wiring an actual brewing-stand recipe to produce it is out of
+scope for now — part of the separate, later Crafting Recipes phase.
+
+### Scope
+
+No power/condition/trigger system (right-click abilities, cooldowns, skills) — attributes are the
+only "behavior," and they're vanilla's own declarative component, shared by items and effects. No
+custom block shapes yet (stairs/slabs/fences are a planned follow-up) — every block is a full
+`cube_all`. No lang-file generation — display names are literal `Component`s. No brewing recipes
+yet (see Potions above) — part of the later Crafting Recipes phase. No biomes or dimensions yet
+either — both are a much larger, separate datapack/worldgen system, planned as their own follow-up
+phase.
+
+### Internals
+
+- `sheepfromheaven.screenspec.runtime.item.{ItemSpec, ItemSpecLoader, ItemSpecs}` and the
+  `.block` equivalents mirror `ScreenSpec`/`ScreenSpecLoader`'s Gson-POJO/classpath-loading
+  pattern (see `GsonSpecIO`).
+- `ModContent` is the orchestrator: registers custom attributes first (`CustomAttributeSpecs`),
+  then builds `DeferredRegister.Items`/`.Blocks`, registers every item/block spec (threading the
+  resolved attribute holders through), and wires creative-tab membership (an existing vanilla tab
+  via `BuildCreativeModeTabContentsEvent`, or a `DeferredRegister<CreativeModeTab>` per named tab).
+- None of `ItemSpecs`/`BlockSpecs`/`CustomAttributeSpecs`/`ModContent` are meant to be called
+  directly by a consuming mod — `ScreenSpecMod` calls them automatically for every mod on the
+  classpath.
 
 ---
 

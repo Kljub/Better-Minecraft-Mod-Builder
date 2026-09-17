@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import { clearTextures, loadAllTextures, saveTexture } from "./textureStore";
+import { clearTextures, deleteTexture, loadAllTextures, saveTexture } from "./textureStore";
 import { extractFromPack, type ExtractResult } from "./extractFromPack";
 import { extractFromGithub, fetchGithubPackCatalog } from "./extractFromGithub";
 
@@ -36,6 +36,12 @@ interface TextureCtx {
   initialized: boolean;
   setupRequired: boolean;
   uploadFiles: (files: FileList) => Promise<void>;
+  /** Saves a single custom image (e.g. for a sprite/icon widget) under a fresh "custom/<name>" pack key and returns that key. */
+  uploadCustomTexture: (file: File) => Promise<string>;
+  /** Permanently deletes a custom ("custom/..."-keyed) texture. No-op for pack/extracted textures. */
+  deleteCustomTexture: (key: string) => Promise<void>;
+  /** Renames a custom texture (new filename stem, extension kept) — returns its new pack key. */
+  renameCustomTexture: (key: string, newStem: string) => Promise<string>;
   extractPack: (file: File) => Promise<ExtractResult>;
   reload: () => Promise<void>;
   reset: () => Promise<void>;
@@ -48,6 +54,9 @@ const Ctx = createContext<TextureCtx>({
   initialized: false,
   setupRequired: false,
   uploadFiles: async () => {},
+  uploadCustomTexture: async () => "",
+  deleteCustomTexture: async () => {},
+  renameCustomTexture: async () => "",
   extractPack: async () => ({ extracted: [], missing: [] }),
   reload: async () => {},
   reset: async () => {},
@@ -146,6 +155,49 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
     applyBlobs(blobs);
   };
 
+  const safeName = (s: string) => s.replace(/[^a-zA-Z0-9_.-]/g, "_");
+
+  /** Builds a fresh unused "custom/<stem><ext>" key, disambiguating with a "_2", "_3", ... suffix
+   * against whatever's currently loaded — shared by uploadCustomTexture and renameCustomTexture.
+   * `ignoreKey` lets a rename keep its own current key out of the collision check. */
+  const freshCustomKey = (stem: string, ext: string, ignoreKey?: string): string => {
+    let key = `custom/${safeName(stem)}${ext}`;
+    let n = 2;
+    while (packTextures[key] && key !== ignoreKey) key = `custom/${safeName(stem)}_${n++}${ext}`;
+    return key;
+  };
+
+  const uploadCustomTexture = async (file: File): Promise<string> => {
+    const dot = file.name.lastIndexOf(".");
+    const stem = dot > 0 ? file.name.slice(0, dot) : file.name;
+    const ext = dot > 0 ? file.name.slice(dot) : "";
+    const key = freshCustomKey(stem, ext);
+    await saveTexture(`pack:${key}`, file);
+    applyBlobs(await loadAllTextures());
+    return key;
+  };
+
+  const deleteCustomTexture = async (key: string): Promise<void> => {
+    if (!key.startsWith("custom/")) return;
+    await deleteTexture(`pack:${key}`);
+    applyBlobs(await loadAllTextures());
+  };
+
+  const renameCustomTexture = async (key: string, newStem: string): Promise<string> => {
+    if (!key.startsWith("custom/")) return key;
+    const blobs = await loadAllTextures();
+    const blob = blobs[`pack:${key}`];
+    if (!blob) return key;
+    const dot = key.lastIndexOf(".");
+    const ext = dot > 0 ? key.slice(dot) : "";
+    const newKey = freshCustomKey(newStem, ext, key);
+    if (newKey === key) return key;
+    await saveTexture(`pack:${newKey}`, blob);
+    await deleteTexture(`pack:${key}`);
+    applyBlobs(await loadAllTextures());
+    return newKey;
+  };
+
   const extractPackFn = async (file: File): Promise<ExtractResult> => {
     const buffer = await file.arrayBuffer();
     const result = await extractFromPack(buffer);
@@ -173,7 +225,10 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
   const ready = REQUIRED_TEXTURES.every((n) => !!textures[n]);
 
   return (
-    <Ctx.Provider value={{ textures, packTextures, ready, initialized, setupRequired, uploadFiles, extractPack: extractPackFn, reload, reset }}>
+    <Ctx.Provider value={{
+      textures, packTextures, ready, initialized, setupRequired, uploadFiles, uploadCustomTexture,
+      deleteCustomTexture, renameCustomTexture, extractPack: extractPackFn, reload, reset,
+    }}>
       {children}
     </Ctx.Provider>
   );

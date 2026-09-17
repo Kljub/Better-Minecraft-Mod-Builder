@@ -13,6 +13,8 @@ interface Props {
   current: string;
   onSelect: (key: string) => void;
   onClose: () => void;
+  /** Uploads a single custom image (not from a resource pack) and returns its new pack key. */
+  onUpload?: (file: File) => Promise<string>;
 }
 
 // ── Tree helpers ──────────────────────────────────────────────────────────────
@@ -113,11 +115,13 @@ function FolderItem({
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
 
-export default function TexturePickerModal({ open, packTextures, current, onSelect, onClose }: Props) {
+export default function TexturePickerModal({ open, packTextures, current, onSelect, onClose, onUpload }: Props) {
   const [filter, setFilter] = useState("");
   const [folder, setFolder] = useState("");
   const [selected, setSelected] = useState(current);
   const searchRef = useRef<HTMLInputElement>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -176,7 +180,7 @@ export default function TexturePickerModal({ open, packTextures, current, onSele
 
           {/* ── Left: folder tree ── */}
           <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: treeW }}>
-            <div className="p-2 border-b shrink-0">
+            <div className="p-2 border-b shrink-0 flex flex-col gap-1.5">
               <Input
                 ref={searchRef}
                 placeholder="Search…"
@@ -184,6 +188,40 @@ export default function TexturePickerModal({ open, packTextures, current, onSele
                 onChange={(e) => setFilter(e.target.value)}
                 className="h-7 text-xs"
               />
+              {onUpload && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={uploading}
+                    onClick={() => uploadRef.current?.click()}
+                  >
+                    {uploading ? "Uploading…" : "Upload image…"}
+                  </Button>
+                  <input
+                    ref={uploadRef}
+                    type="file"
+                    accept=".png,image/png"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!file) return;
+                      setUploading(true);
+                      try {
+                        const key = await onUpload(file);
+                        setSelected(key);
+                        setFilter("");
+                        const parts = key.split("/");
+                        setFolder(parts.length > 1 ? parts.slice(0, -1).join("/") : "");
+                      } finally {
+                        setUploading(false);
+                      }
+                    }}
+                  />
+                </>
+              )}
             </div>
             {!searching && (
               <div className="flex-1 overflow-y-auto p-2 text-xs">

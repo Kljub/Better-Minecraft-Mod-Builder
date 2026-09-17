@@ -41,6 +41,16 @@ export async function loadAllTextures(): Promise<Record<string, Blob>> {
   });
 }
 
+export async function deleteTexture(name: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(name);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function clearTextures(): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {

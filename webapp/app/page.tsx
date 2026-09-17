@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import WelcomeScreen from "@/components/WelcomeScreen";
 import SetupScreen from "@/components/SetupScreen";
 import { useTextures } from "@/lib/TextureContext";
-import type { ScreenSpec } from "@/lib/types";
+import type {
+  ScreenSpec, ItemSpec, BlockSpec, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
+  AchievementSpec, RecipeSpec, TradeSpec, LootEntrySpec, BiomeSpec, DimensionSpec, ArmorSpec,
+} from "@/lib/types";
 import type { ProjectSummary } from "@/components/WelcomeScreen";
 import { migrateProjectJson, migrateScreenJson } from "@/lib/migrations";
 
@@ -14,7 +17,35 @@ const LEGACY_KEY = "mc-ui-builder-session";
 
 interface HistoryEntry {
   screens: ScreenSpec[];
+  items: ItemSpec[];
+  blocks: BlockSpec[];
+  creativeTabs: CreativeTabSpec[];
+  customAttributes: CustomAttributeSpec[];
+  effects: EffectSpec[];
+  potions: PotionSpec[];
+  achievements: AchievementSpec[];
+  recipes: RecipeSpec[];
+  trades: TradeSpec[];
+  lootEntries: LootEntrySpec[];
+  biomes: BiomeSpec[];
+  dimensions: DimensionSpec[];
+  armors: ArmorSpec[];
   activeIdx: number;
+  activeDocType:
+    | "screen" | "item" | "block" | "attribute" | "effect" | "potion" | "texture"
+    | "achievement" | "recipe" | "trade" | "loot" | "biome" | "dimension" | "armor";
+  activeItemIdx: number;
+  activeBlockIdx: number;
+  activeAttributeIdx: number;
+  activeEffectIdx: number;
+  activePotionIdx: number;
+  activeAchievementIdx: number;
+  activeRecipeIdx: number;
+  activeTradeIdx: number;
+  activeLootEntryIdx: number;
+  activeBiomeIdx: number;
+  activeDimensionIdx: number;
+  activeArmorIdx: number;
 }
 
 interface SavedSession {
@@ -31,13 +62,24 @@ interface StoredProject {
   updatedAt: number;
 }
 
+function emptyHistoryEntry(screens: ScreenSpec[]): HistoryEntry {
+  return {
+    screens, items: [], blocks: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
+    achievements: [], recipes: [], trades: [], lootEntries: [], biomes: [], dimensions: [], armors: [],
+    activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0,
+    activeAttributeIdx: 0, activeEffectIdx: 0, activePotionIdx: 0,
+    activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0, activeLootEntryIdx: 0,
+    activeBiomeIdx: 0, activeDimensionIdx: 0, activeArmorIdx: 0,
+  };
+}
+
 function migrateSession(raw: Record<string, unknown>): SavedSession {
   const hist = raw.history as unknown[];
   if (!Array.isArray(hist) || hist.length === 0) {
-    return { history: [{ screens: [{ id: "main", width: 320, height: 180, widgets: [] }], activeIdx: 0 }], cursor: 0, gridSize: 4, showGrid: true };
+    return { history: [emptyHistoryEntry([{ id: "main", width: 350, height: 200, widgets: [] }])], cursor: 0, gridSize: 4, showGrid: true };
   }
   if ('widgets' in (hist[0] as object)) {
-    return { ...raw, history: (hist as ScreenSpec[]).map(s => ({ screens: [s], activeIdx: 0 })) } as SavedSession;
+    return { ...raw, history: (hist as ScreenSpec[]).map(s => emptyHistoryEntry([s])) } as unknown as SavedSession;
   }
   return raw as unknown as SavedSession;
 }
@@ -96,9 +138,9 @@ export default function ProjectsPage() {
   }, [router]);
 
   const handleCreateProject = useCallback((modId: string, screenId: string) => {
-    const emptyScreen: ScreenSpec = { id: screenId, modId, width: 320, height: 180, widgets: [] };
+    const emptyScreen: ScreenSpec = { id: screenId, modId, width: 350, height: 200, widgets: [] };
     const session: SavedSession = {
-      history: [{ screens: [emptyScreen], activeIdx: 0 }],
+      history: [emptyHistoryEntry([emptyScreen])],
       cursor: 0, gridSize: 4, showGrid: true, scale: 3,
     };
     const key = `project_${Date.now()}`;
@@ -121,7 +163,13 @@ export default function ProjectsPage() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        interface ProjectFile { screens: ScreenSpec[]; }
+        interface ProjectFile {
+          screens: ScreenSpec[]; items?: ItemSpec[]; blocks?: BlockSpec[];
+          creativeTabs?: CreativeTabSpec[]; customAttributes?: CustomAttributeSpec[];
+          effects?: EffectSpec[]; potions?: PotionSpec[];
+          achievements?: AchievementSpec[]; recipes?: RecipeSpec[]; trades?: TradeSpec[]; lootEntries?: LootEntrySpec[];
+          biomes?: BiomeSpec[]; dimensions?: DimensionSpec[]; armors?: ArmorSpec[];
+        }
         const migrated = migrateProjectJson(JSON.parse(ev.target?.result as string) as Record<string, unknown>) as unknown as ProjectFile;
         if (!Array.isArray(migrated.screens) || migrated.screens.length === 0) throw new Error("Invalid project file");
         const screens = migrated.screens
@@ -130,9 +178,25 @@ export default function ProjectsPage() {
         for (const s of screens) {
           if (!s.id || !Array.isArray(s.widgets)) throw new Error("Invalid ScreenSpec in project");
         }
+        const items = Array.isArray(migrated.items) ? migrated.items : [];
+        const blocks = Array.isArray(migrated.blocks) ? migrated.blocks : [];
+        const creativeTabs = Array.isArray(migrated.creativeTabs) ? migrated.creativeTabs : [];
+        const customAttributes = Array.isArray(migrated.customAttributes) ? migrated.customAttributes : [];
+        const effects = Array.isArray(migrated.effects) ? migrated.effects : [];
+        const potions = Array.isArray(migrated.potions) ? migrated.potions : [];
+        const achievements = Array.isArray(migrated.achievements) ? migrated.achievements : [];
+        const recipes = Array.isArray(migrated.recipes) ? migrated.recipes : [];
+        const trades = Array.isArray(migrated.trades) ? migrated.trades : [];
+        const lootEntries = Array.isArray(migrated.lootEntries) ? migrated.lootEntries : [];
+        const biomes = Array.isArray(migrated.biomes) ? migrated.biomes : [];
+        const dimensions = Array.isArray(migrated.dimensions) ? migrated.dimensions : [];
+        const armors = Array.isArray(migrated.armors) ? migrated.armors : [];
         const key = `project_${Date.now()}`;
         const session: SavedSession = {
-          history: [{ screens, activeIdx: 0 }],
+          history: [{
+            ...emptyHistoryEntry(screens), items, blocks, creativeTabs, customAttributes, effects, potions,
+            achievements, recipes, trades, lootEntries, biomes, dimensions, armors,
+          }],
           cursor: 0, gridSize: 4, showGrid: true, scale: 3,
         };
         const newProject = { key, session, updatedAt: Date.now() };
@@ -155,7 +219,7 @@ export default function ProjectsPage() {
       if (!parsed.id || !Array.isArray(parsed.widgets)) throw new Error("Invalid ScreenSpec");
       const DEV_TEST_KEY = "__dev_test_screen__";
       const session: SavedSession = {
-        history: [{ screens: [parsed], activeIdx: 0 }],
+        history: [emptyHistoryEntry([parsed])],
         cursor: 0, gridSize: 4, showGrid: true, scale: 3,
       };
       const current = loadProjects();

@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import { saveTexture } from "./textureStore";
 import {
-  TASKS_9SLICE, NESTED_TAB_TASKS, CHECKBOX_SPRITES, TAB_SPRITES,
+  TASKS_9SLICE, NESTED_TAB_TASKS, CHECKBOX_SPRITES, TAB_SPRITES, HUD_SPRITES,
   SLOT_SPRITE_PATH, SLOT_CROP, SCROLLBAR_SPRITE_PATH, SCROLLBAR_ATLAS_FALLBACK,
   sample9slice, bitmapToImageData, imageDataToBlob, cropImageData,
 } from "./textureTasks";
@@ -50,8 +50,8 @@ export async function extractFromPack(buffer: ArrayBuffer): Promise<ExtractResul
     extracted.push(task.name);
   }
 
-  // --- Checkbox + tab sprites: direct copy ---
-  for (const { name, path } of [...CHECKBOX_SPRITES, ...TAB_SPRITES]) {
+  // --- Checkbox + tab + HUD bar sprites: direct copy ---
+  for (const { name, path } of [...CHECKBOX_SPRITES, ...TAB_SPRITES, ...HUD_SPRITES]) {
     const bitmap = await readBitmap(zip, path);
     if (bitmap) {
       const blob = await imageDataToBlob(bitmapToImageData(bitmap));

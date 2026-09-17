@@ -72,6 +72,39 @@ export const CHECKBOX_SPRITES: { name: string; path: string }[] = [
   { name: "mc_checkbox_selected_highlighted.png", path: "assets/minecraft/textures/gui/sprites/widget/checkbox_selected_highlighted.png" },
 ];
 
+// HUD bar sprites (9×9 icons, 182×5 bars — used as-is, no processing needed)
+export const HUD_SPRITES: { name: string; path: string }[] = [
+  { name: "mc_heart_container.png",       path: "assets/minecraft/textures/gui/sprites/hud/heart/container.png" },
+  { name: "mc_heart_full.png",            path: "assets/minecraft/textures/gui/sprites/hud/heart/full.png" },
+  { name: "mc_heart_half.png",            path: "assets/minecraft/textures/gui/sprites/hud/heart/half.png" },
+  { name: "mc_heart_absorbing_full.png",  path: "assets/minecraft/textures/gui/sprites/hud/heart/absorbing_full.png" },
+  { name: "mc_heart_absorbing_half.png",  path: "assets/minecraft/textures/gui/sprites/hud/heart/absorbing_half.png" },
+  { name: "mc_heart_withered_full.png",   path: "assets/minecraft/textures/gui/sprites/hud/heart/withered_full.png" },
+  { name: "mc_heart_withered_half.png",   path: "assets/minecraft/textures/gui/sprites/hud/heart/withered_half.png" },
+  { name: "mc_armor_empty.png",           path: "assets/minecraft/textures/gui/sprites/hud/armor_empty.png" },
+  { name: "mc_armor_half.png",            path: "assets/minecraft/textures/gui/sprites/hud/armor_half.png" },
+  { name: "mc_armor_full.png",            path: "assets/minecraft/textures/gui/sprites/hud/armor_full.png" },
+  { name: "mc_food_empty.png",            path: "assets/minecraft/textures/gui/sprites/hud/food_empty.png" },
+  { name: "mc_food_half.png",             path: "assets/minecraft/textures/gui/sprites/hud/food_half.png" },
+  { name: "mc_food_full.png",             path: "assets/minecraft/textures/gui/sprites/hud/food_full.png" },
+  { name: "mc_xp_bar_background.png",     path: "assets/minecraft/textures/gui/sprites/hud/experience_bar_background.png" },
+  { name: "mc_xp_bar_progress.png",       path: "assets/minecraft/textures/gui/sprites/hud/experience_bar_progress.png" },
+  { name: "mc_boss_bar_pink_background.png",   path: "assets/minecraft/textures/gui/sprites/boss_bar/pink_background.png" },
+  { name: "mc_boss_bar_pink_progress.png",     path: "assets/minecraft/textures/gui/sprites/boss_bar/pink_progress.png" },
+  { name: "mc_boss_bar_blue_background.png",   path: "assets/minecraft/textures/gui/sprites/boss_bar/blue_background.png" },
+  { name: "mc_boss_bar_blue_progress.png",     path: "assets/minecraft/textures/gui/sprites/boss_bar/blue_progress.png" },
+  { name: "mc_boss_bar_red_background.png",    path: "assets/minecraft/textures/gui/sprites/boss_bar/red_background.png" },
+  { name: "mc_boss_bar_red_progress.png",      path: "assets/minecraft/textures/gui/sprites/boss_bar/red_progress.png" },
+  { name: "mc_boss_bar_green_background.png",  path: "assets/minecraft/textures/gui/sprites/boss_bar/green_background.png" },
+  { name: "mc_boss_bar_green_progress.png",    path: "assets/minecraft/textures/gui/sprites/boss_bar/green_progress.png" },
+  { name: "mc_boss_bar_yellow_background.png", path: "assets/minecraft/textures/gui/sprites/boss_bar/yellow_background.png" },
+  { name: "mc_boss_bar_yellow_progress.png",   path: "assets/minecraft/textures/gui/sprites/boss_bar/yellow_progress.png" },
+  { name: "mc_boss_bar_purple_background.png", path: "assets/minecraft/textures/gui/sprites/boss_bar/purple_background.png" },
+  { name: "mc_boss_bar_purple_progress.png",   path: "assets/minecraft/textures/gui/sprites/boss_bar/purple_progress.png" },
+  { name: "mc_boss_bar_white_background.png",  path: "assets/minecraft/textures/gui/sprites/boss_bar/white_background.png" },
+  { name: "mc_boss_bar_white_progress.png",    path: "assets/minecraft/textures/gui/sprites/boss_bar/white_progress.png" },
+];
+
 // Tab sprites from the advancements sprite sheet (28×32) — proper left/middle/right for both states
 export const TAB_SPRITES: { name: string; path: string }[] = [
   { name: "tab_selected_left.png",     path: "assets/minecraft/textures/gui/sprites/advancements/tab_above_left_selected.png" },

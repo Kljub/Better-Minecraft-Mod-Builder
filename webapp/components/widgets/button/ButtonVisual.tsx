@@ -4,7 +4,7 @@ import { FONT_SIZE } from "../shared";
 import type { VisualProps } from "../shared";
 
 /** Handles both `button` and `toggle_button` — same rendering, toggle just tints text/state differently. */
-export default function ButtonVisual({ widget, interactState = "idle", toggled = false, tex }: VisualProps) {
+export default function ButtonVisual({ widget, interactState = "idle", toggled = false, tex, packTextures }: VisualProps) {
   const borderPx = 2;
   const isToggle = widget.type === "toggle_button";
 
@@ -31,9 +31,9 @@ export default function ButtonVisual({ widget, interactState = "idle", toggled =
         textShadow: `1px 1px 0 #333`,
         userSelect: "none", gap: 1,
       }}>
-        {widget.icon && (
+        {widget.icon && packTextures[widget.icon] && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img draggable={false} src={widget.icon} alt="" style={{ width: FONT_SIZE, height: FONT_SIZE, imageRendering: "pixelated" }} />
+          <img draggable={false} src={packTextures[widget.icon]} alt="" style={{ width: FONT_SIZE, height: FONT_SIZE, imageRendering: "pixelated" }} />
         )}
         {widget.text}
       </div>
