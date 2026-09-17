@@ -687,19 +687,6 @@ stub showing exactly where it hooks in later, by hand.
 **Natural biome spawning isn't wired** (`RegisterSpawnPlacementsEvent` is unused) — v1 mobs are
 spawn-egg / `/summon` only.
 
-**Custom Model** (`EntitySpec.useCustomModel` + `geometry`) swaps only the *rendering* half of the
-above — `bodyTemplate` still decides AI/physics either way. When set, `GenericEntityModel`/
-`GenericMobRenderer` (one shared class pair, same idea as the templates above) replace the
-template's own vanilla model/renderer with one built dynamically at mod-init time from `geometry`'s
-cuboid list — plain `CubeListBuilder`/`MeshDefinition`/`LayerDefinition` calls in a loop, no
-reflection or code-gen, verified against the decompiled `net.minecraft.client.model.geom.builders`
-classes. Each cuboid (`{ name, position, size, rotation, uv, mirror }`, position/size in 1/16-block
-units) is its own named part, rotating around its own center — no parent/child bone nesting or
-animation in v1, and UV is Minecraft's standard single-origin "box UV" auto-layout (verified in the
-decompiled `ModelPart.Cube` constructor), not per-face UV. The web tool's Entities tab has an
-in-browser cuboid editor (3D gizmo move/rotate, size/UV number fields) for authoring `geometry`
-visually — see `webapp/components/EntityGeometryEditor.tsx`.
-
 ### Scope
 
 No power/condition/trigger system (right-click abilities, cooldowns, skills) — attributes are the

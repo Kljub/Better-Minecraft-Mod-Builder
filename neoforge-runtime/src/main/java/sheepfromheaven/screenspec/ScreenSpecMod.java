@@ -67,10 +67,6 @@ public class ScreenSpecMod {
                     && potions.isEmpty() && armors.isEmpty() && entities.isEmpty()) continue;
             ModContent.register(namespace, modBus, items, blocks, customAttributes, effects, potions, armors, entities);
             if (FMLEnvironment.getDist() == Dist.CLIENT && !entities.isEmpty()) {
-                // Layer definitions must be registered before renderers bake them — NeoForge fires
-                // RegisterLayerDefinitions before RegisterRenderers regardless of listener order,
-                // but keep this call ahead of the renderer one for readability.
-                EntitySpecs.registerModelLayers(modBus, namespace, entities);
                 EntitySpecs.registerRenderers(modBus, namespace, entities);
             }
         }

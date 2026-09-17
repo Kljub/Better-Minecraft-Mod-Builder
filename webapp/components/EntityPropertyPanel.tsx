@@ -4,12 +4,11 @@ import React, { useState } from "react";
 import type { EntitySpec } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Field, NumInput, PropSelect, TextureField, HexColorField, Toggle } from "@/components/SchemaFields";
-import { BODY_TEMPLATE_OPTIONS, BODY_TEMPLATE_LABELS, MOB_CATEGORY_OPTIONS, GEOMETRY_DEFAULT } from "@/lib/entityRegistry";
+import { BODY_TEMPLATE_OPTIONS, BODY_TEMPLATE_LABELS, MOB_CATEGORY_OPTIONS } from "@/lib/entityRegistry";
 import { CREATIVE_TAB_OPTIONS, CREATIVE_TAB_LABELS } from "@/lib/itemRegistry";
-import type { CreativeTabSpec, EntityGeometry } from "@/lib/types";
+import type { CreativeTabSpec } from "@/lib/types";
 import { useTextures } from "@/lib/TextureContext";
 import TexturePickerModal from "@/components/TexturePickerModal";
-import EntityGeometryEditor from "@/components/EntityGeometryEditor";
 
 interface Props {
   entity: EntitySpec | null;
@@ -57,27 +56,9 @@ export default function EntityPropertyPanel({ entity, creativeTabs, onUpdate, on
           />
         </Field>
         <p className="text-[10px] text-muted-foreground mt-1">
-          Decides AI/physics only. Rendering below can either reuse that vanilla mob&apos;s model or a custom one.
+          Reuses that vanilla mob&apos;s model/animations in-game — texture below must match its skin layout.
         </p>
       </div>
-
-      <div className="col-span-2 flex items-center justify-between">
-        <span className="text-muted-foreground">Custom Model (cuboid editor)</span>
-        <Toggle
-          checked={entity.useCustomModel}
-          onChange={(v) => onUpdate({ useCustomModel: v, geometry: entity.geometry ?? GEOMETRY_DEFAULT })}
-        />
-      </div>
-
-      {entity.useCustomModel && (
-        <div className="col-span-2 rounded border border-input p-2" style={{ minHeight: 420 }}>
-          <EntityGeometryEditor
-            geometry={entity.geometry}
-            textureUrl={entity.texture ? packTextures[entity.texture] : undefined}
-            onChange={(next: EntityGeometry) => onUpdate({ geometry: next })}
-          />
-        </div>
-      )}
 
       <div className="col-span-2">
         <Field label="Texture (skin)">
