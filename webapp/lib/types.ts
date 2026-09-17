@@ -527,5 +527,33 @@ export interface EntitySpec {
   spawnEggSecondaryColor: string;
   /** a CreativeTabKey, or a project-defined CreativeTabSpec's id */
   creativeTab: string;
+  /** true swaps the in-game model+renderer from the vanilla bodyTemplate's own to one dynamically
+   * built from `geometry` — bodyTemplate still decides AI/physics either way. */
+  useCustomModel: boolean;
+  geometry: EntityGeometry;
   appVersion?: string;
+}
+
+/** One box in a custom entity model — Minecraft's real "box UV" cuboid shape (same convention
+ * Blockbench's Java/Bedrock box-UV mode uses): `position` is the min corner, `size` is
+ * width/height/depth, both in 1/16-block model units. Rotates around its own geometric center
+ * (no separate pivot field — an off-center pivot is a possible future addition, not v1). `uv` is
+ * the box's `texOffs(u,v)` origin — the 6 faces auto-layout from there via Minecraft's fixed
+ * cross pattern, not per-face UV. */
+export interface EntityCuboid {
+  id: string;
+  name: string;
+  position: [number, number, number];
+  size: [number, number, number];
+  /** degrees, around the box's own center */
+  rotation: [number, number, number];
+  uv: [number, number];
+  mirror: boolean;
+}
+
+export interface EntityGeometry {
+  /** must match the entity's `texture` PNG's actual pixel dimensions for correct UV mapping */
+  textureWidth: number;
+  textureHeight: number;
+  cuboids: EntityCuboid[];
 }

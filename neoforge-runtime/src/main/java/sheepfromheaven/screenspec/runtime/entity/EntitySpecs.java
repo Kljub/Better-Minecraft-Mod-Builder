@@ -1,5 +1,11 @@
 package sheepfromheaven.screenspec.runtime.entity;
 
+import net.minecraft.client.model.geom.ModelLayerLocation;
+import net.minecraft.client.model.geom.PartPose;
+import net.minecraft.client.model.geom.builders.CubeListBuilder;
+import net.minecraft.client.model.geom.builders.LayerDefinition;
+import net.minecraft.client.model.geom.builders.MeshDefinition;
+import net.minecraft.client.model.geom.builders.PartDefinition;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -60,6 +66,12 @@ import java.util.Map;
  * (unlike Villager) — subclassing those without also registering a default variant/profession entry
  * risks a crash the first time the entity renders or breeds. More templates are a natural fast-follow
  * once that's scoped.
+ *
+ * <p><b>Custom Model</b> ({@link EntitySpec#useCustomModel}) swaps only the rendering half of the
+ * above — {@link GenericEntityModel}/{@link GenericMobRenderer} replace the template's own vanilla
+ * model/renderer, built dynamically from {@link EntitySpec.Geometry} (see {@link
+ * #buildLayerDefinition}) rather than compiled, since this runtime has no code-gen step. The
+ * *entity* class (AI/physics) is still whichever {@code bodyTemplate} was picked either way.
  */
 public final class EntitySpecs {
     private EntitySpecs() {}
@@ -151,6 +163,12 @@ public final class EntitySpecs {
             for (EntitySpec spec : specs) {
                 EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.fromNamespaceAndPath(modId, spec.id));
                 Identifier texture = Identifier.fromNamespaceAndPath(modId, "entity/" + spec.id);
+                if (spec.useCustomModel && spec.geometry != null) {
+                    ModelLayerLocation layer = modelLayerLocation(modId, spec);
+                    registerRenderer(event, type, (EntityRendererProvider<Mob>) ctx ->
+                        new GenericMobRenderer<>(ctx, new GenericEntityModel(ctx.bakeLayer(layer)), texture));
+                    continue;
+                }
                 switch (resolveTemplate(spec.bodyTemplate)) {
                     case ZOMBIE -> registerRenderer(event, type, (EntityRendererProvider<Zombie>) ctx -> new TemplateZombieRenderer(ctx, texture));
                     case SKELETON -> registerRenderer(event, type, (EntityRendererProvider<Skeleton>) ctx -> new TemplateSkeletonRenderer(ctx, texture));
@@ -159,6 +177,51 @@ public final class EntitySpecs {
                 }
             }
         });
+    }
+
+    /** Client-only, same caller restriction as {@link #registerRenderers} — registers the dynamic
+     * {@link LayerDefinition} for every {@link EntitySpec#useCustomModel} spec. Fires (and must be
+     * registered) before {@link EntityRenderersEvent.RegisterRenderers}, so {@code context.bakeLayer}
+     * has something to bake — NeoForge fires these two events in that fixed order regardless of
+     * mod-bus listener registration order. */
+    public static void registerModelLayers(IEventBus modBus, String modId, List<EntitySpec> specs) {
+        modBus.addListener(EntityRenderersEvent.RegisterLayerDefinitions.class, event -> {
+            for (EntitySpec spec : specs) {
+                if (!spec.useCustomModel || spec.geometry == null) continue;
+                event.registerLayerDefinition(modelLayerLocation(modId, spec), () -> buildLayerDefinition(spec.geometry));
+            }
+        });
+    }
+
+    private static ModelLayerLocation modelLayerLocation(String modId, EntitySpec spec) {
+        return new ModelLayerLocation(Identifier.fromNamespaceAndPath(modId, spec.id), "main");
+    }
+
+    /** Builds the equivalent of a hand-written vanilla {@code LayerDefinition} from a spec's
+     * cuboid list — plain builder calls in a loop, no reflection/code-gen. Each cuboid becomes its
+     * own named child part of the root, posed at its own center (so it rotates around that center,
+     * not a corner) with the box itself added at a `-size/2` local offset to land back at the
+     * right place — mirrors how a hand-authored vanilla model poses an per-limb part vs. the cube(s)
+     * inside it. */
+    private static LayerDefinition buildLayerDefinition(EntitySpec.Geometry geometry) {
+        MeshDefinition mesh = new MeshDefinition();
+        PartDefinition root = mesh.getRoot();
+        if (geometry.cuboids != null) {
+            for (EntitySpec.Cuboid cuboid : geometry.cuboids) {
+                float halfW = cuboid.size[0] / 2f, halfH = cuboid.size[1] / 2f, halfD = cuboid.size[2] / 2f;
+                CubeListBuilder box = CubeListBuilder.create()
+                    .texOffs(cuboid.uv[0], cuboid.uv[1])
+                    .mirror(cuboid.mirror)
+                    .addBox(-halfW, -halfH, -halfD, cuboid.size[0], cuboid.size[1], cuboid.size[2]);
+                PartPose pose = PartPose.offsetAndRotation(
+                    cuboid.position[0] + halfW, cuboid.position[1] + halfH, cuboid.position[2] + halfD,
+                    (float) Math.toRadians(cuboid.rotation[0]),
+                    (float) Math.toRadians(cuboid.rotation[1]),
+                    (float) Math.toRadians(cuboid.rotation[2]));
+                root.addOrReplaceChild(cuboid.name, box, pose);
+            }
+        }
+        return LayerDefinition.create(mesh, Math.max(1, geometry.textureWidth), Math.max(1, geometry.textureHeight));
     }
 
     /** Same contravariant registration vanilla itself relies on for e.g. HuskRenderer (a renderer
