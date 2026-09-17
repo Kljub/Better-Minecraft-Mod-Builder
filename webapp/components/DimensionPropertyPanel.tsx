@@ -143,7 +143,7 @@ export default function DimensionPropertyPanel({ dimension, biomes, blocks, modI
         + Add layer
       </button>
       {layers.length === 0 && <div className="col-span-2 text-[10px] text-muted-foreground italic">No layers yet — the world will be empty air.</div>}
-      {[...layers].map((layer, displayIdx) => {
+      {[...layers].reverse().map((layer, displayIdx) => {
         const i = layers.length - 1 - displayIdx; // top layer shown first
         const texKey = resolveLayerTextureKey(layer.block, modId, blocks);
         const texUrl = packTextures[texKey];
