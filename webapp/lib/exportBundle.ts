@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import { loadAllTextures } from "./textureStore";
 import type {
-  ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
+  ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, BlockFaceKey, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
   AchievementSpec, RecipeSpec, TradeSpec, TradeItemStack, LootEntrySpec, BiomeSpec, DimensionSpec,
   ArmorSpec,
 } from "./types";
@@ -43,8 +43,27 @@ function blockstateJson(modId: string, block: BlockSpec): string {
 }
 
 function blockModelJson(modId: string, block: BlockSpec): string {
+  const faces = block.faceTextures;
+  const hasFaceOverrides = !!faces && Object.values(faces).some((t) => t?.trim());
+  if (!hasFaceOverrides) {
+    return JSON.stringify(
+      { parent: "block/cube_all", textures: { all: `${modId}:block/${textureBaseName(block.texture)}` } },
+      null, 2
+    );
+  }
+  // Real vanilla "block/cube" model — needs all 6 faces plus "particle" (breaking/dig particles),
+  // verified against the game jar's own cube.json. Faces without an override fall back to the
+  // block's main texture, same fallback the single-texture cube_all path already used.
+  const faceTex = (face: BlockFaceKey) => `${modId}:block/${textureBaseName(faces?.[face]?.trim() || block.texture)}`;
   return JSON.stringify(
-    { parent: "block/cube_all", textures: { all: `${modId}:block/${textureBaseName(block.texture)}` } },
+    {
+      parent: "block/cube",
+      textures: {
+        particle: faceTex("down"),
+        up: faceTex("up"), down: faceTex("down"),
+        north: faceTex("north"), south: faceTex("south"), east: faceTex("east"), west: faceTex("west"),
+      },
+    },
     null, 2
   );
 }
@@ -394,7 +413,10 @@ function collectAllSrcs(r: ResolvedInput): Set<string> {
   const srcs = new Set<string>();
   for (const s of r.screens) for (const src of collectSpriteSrcs(s.widgets)) srcs.add(src);
   for (const it of r.items) if (it.texture) srcs.add(it.texture);
-  for (const b of r.blocks) if (b.texture) srcs.add(b.texture);
+  for (const b of r.blocks) {
+    if (b.texture) srcs.add(b.texture);
+    if (b.faceTextures) for (const t of Object.values(b.faceTextures)) if (t) srcs.add(t);
+  }
   for (const a of r.achievements) if (!a.parentId && a.background) srcs.add(a.background);
   for (const e of r.effects) if (e.icon) srcs.add(e.icon);
   for (const a of r.armors) {

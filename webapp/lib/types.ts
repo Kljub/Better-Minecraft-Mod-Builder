@@ -159,12 +159,19 @@ export interface ItemSpec {
   appVersion?: string;
 }
 
+export type BlockFaceKey = "up" | "down" | "north" | "south" | "east" | "west";
+
 export interface BlockSpec {
   id: string;
   modId?: string;
   displayName: string;
-  /** single texture applied to all 6 faces (cube_all) */
+  /** single texture applied to all 6 faces (cube_all) — the fallback for any face without an
+   * override in `faceTextures` */
   texture: string;
+  /** Per-face texture overrides. A face left unset renders `texture`; with none set the block
+   * still exports as a single cube_all model (parent "block/cube" only kicks in once at least
+   * one face is overridden). */
+  faceTextures?: Partial<Record<BlockFaceKey, string>>;
   hardness: number;
   resistance: number;
   requiresTool: boolean;

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import type { ItemSpec, BlockSpec, AttributeModifierSpec, CreativeTabSpec, CustomAttributeSpec } from "@/lib/types";
+import type { ItemSpec, BlockSpec, BlockFaceKey, AttributeModifierSpec, CreativeTabSpec, CustomAttributeSpec } from "@/lib/types";
 import type { PropField } from "@/lib/widgetRegistry";
 import { useTextures } from "@/lib/TextureContext";
 import TexturePickerModal from "@/components/TexturePickerModal";
@@ -12,7 +12,7 @@ import {
   ITEM_PROPERTY_SCHEMA, ITEM_FOOD_SCHEMA, ITEM_ARMOR_SCHEMA, CREATIVE_TAB_OPTIONS, CREATIVE_TAB_LABELS,
   ATTRIBUTE_OPTIONS, defaultArmorAttributes,
 } from "@/lib/itemRegistry";
-import { BLOCK_PROPERTY_SCHEMA, TOOL_TIER_SPEEDS, approxBreakTime, HARDNESS_REFERENCE, RESISTANCE_REFERENCE } from "@/lib/blockRegistry";
+import { BLOCK_PROPERTY_SCHEMA, BLOCK_FACES, TOOL_TIER_SPEEDS, approxBreakTime, HARDNESS_REFERENCE, RESISTANCE_REFERENCE } from "@/lib/blockRegistry";
 
 export type ItemBlockDoc =
   | { kind: "item"; spec: ItemSpec }
@@ -40,6 +40,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
   const { packTextures, uploadCustomTexture } = useTextures();
   const [texPickerOpen, setTexPickerOpen] = useState(false);
   const [stagePickerFor, setStagePickerFor] = useState<number | null>(null);
+  const [facePickerFor, setFacePickerFor] = useState<BlockFaceKey | null>(null);
 
   if (!doc) {
     return (
@@ -59,6 +60,14 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
   const setAttributes = (next: AttributeModifierSpec[]) => set({ attributes: next });
   const damageStages = item?.damageStages ?? [];
   const setDamageStages = (next: { threshold: number; texture: string }[]) => set({ damageStages: next });
+
+  const block = kind === "block" ? (spec as BlockSpec) : null;
+  const setFaceTexture = (face: BlockFaceKey, value: string) => {
+    const next = { ...(block?.faceTextures ?? {}) };
+    if (value) next[face] = value;
+    else delete next[face];
+    set({ faceTextures: next });
+  };
 
   const creativeTabOptions = [...CREATIVE_TAB_OPTIONS, ...creativeTabs.map((t) => t.id)];
   const creativeTabLabels = {
@@ -203,6 +212,59 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
           </Field>
         );
       })}
+
+      {block && (
+        <div className="col-span-2">
+          <div className="font-semibold text-muted-foreground mt-1">Per-Face Textures</div>
+          <p className="text-[10px] text-muted-foreground mb-1">
+            Override individual faces — a face left unset renders the Texture above (cube_all).
+          </p>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+            {BLOCK_FACES.map(({ key, label }) => {
+              const faceTex = block.faceTextures?.[key] ?? "";
+              const texUrl = faceTex ? packTextures[faceTex] : undefined;
+              return (
+                <div key={key} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    title={faceTex ? `${faceTex} — click to change` : "Click to pick a texture"}
+                    onClick={() => setFacePickerFor(key)}
+                    className="h-6 w-6 shrink-0 overflow-hidden rounded border border-input bg-[#8b8b8b]"
+                    style={{ imageRendering: "pixelated" }}
+                  >
+                    {texUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={texUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
+                    )}
+                  </button>
+                  <span className="text-muted-foreground truncate">{label}</span>
+                  {faceTex && (
+                    <button
+                      type="button"
+                      title="Reset to main texture"
+                      onClick={() => setFaceTexture(key, "")}
+                      className="ml-auto shrink-0 text-muted-foreground hover:text-destructive px-1"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <TexturePickerModal
+            open={facePickerFor !== null}
+            packTextures={packTextures}
+            current={facePickerFor ? (block.faceTextures?.[facePickerFor] ?? "") : ""}
+            onSelect={(k) => {
+              if (facePickerFor) setFaceTexture(facePickerFor, k);
+              setFacePickerFor(null);
+            }}
+            onClose={() => setFacePickerFor(null)}
+            onUpload={uploadCustomTexture}
+          />
+        </div>
+      )}
 
       {item && (
         <div className="col-span-2">

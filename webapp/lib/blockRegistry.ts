@@ -1,6 +1,15 @@
-import type { BlockSpec } from "./types";
+import type { BlockFaceKey, BlockSpec } from "./types";
 import type { PropField } from "./widgetRegistry";
 import { CREATIVE_TAB_OPTIONS } from "./itemRegistry";
+
+export const BLOCK_FACES: { key: BlockFaceKey; label: string }[] = [
+  { key: "up", label: "Top" },
+  { key: "down", label: "Bottom" },
+  { key: "north", label: "North" },
+  { key: "south", label: "South" },
+  { key: "east", label: "East" },
+  { key: "west", label: "West" },
+];
 
 export const BLOCK_DEFAULT: Omit<BlockSpec, "id"> = {
   displayName: "New Block",
