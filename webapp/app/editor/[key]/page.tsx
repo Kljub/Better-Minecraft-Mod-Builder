@@ -9,8 +9,6 @@ import ItemBlockPropertyPanel from "@/components/ItemBlockPropertyPanel";
 import ItemBlockPreview from "@/components/ItemBlockPreview";
 import ArmorPropertyPanel, { type TexTarget } from "@/components/ArmorPropertyPanel";
 import ArmorPreview from "@/components/ArmorPreview";
-import EntityPropertyPanel from "@/components/EntityPropertyPanel";
-import EntityPreview from "@/components/EntityPreview";
 import CustomAttributePropertyPanel from "@/components/CustomAttributePropertyPanel";
 import CustomAttributePreview from "@/components/CustomAttributePreview";
 import EffectPropertyPanel from "@/components/EffectPropertyPanel";
@@ -38,13 +36,11 @@ import TexturePickerModal from "@/components/TexturePickerModal";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
   AttributeModifierSpec, AchievementSpec, RecipeSpec, TradeSpec, LootEntrySpec, BiomeSpec, DimensionSpec, ArmorSpec,
-  EntitySpec,
 } from "@/lib/types";
 import { generateJavaClass } from "@/lib/generateJavaClass";
 import { getWidgetDef } from "@/lib/widgetRegistry";
 import { ITEM_DEFAULT, defaultCustomAttribute, suggestCustomAttributeId, slugifyId } from "@/lib/itemRegistry";
 import { ARMOR_DEFAULT } from "@/lib/armorRegistry";
-import { ENTITY_DEFAULT } from "@/lib/entityRegistry";
 import { BLOCK_DEFAULT } from "@/lib/blockRegistry";
 import { EFFECT_DEFAULT } from "@/lib/effectRegistry";
 import { POTION_DEFAULT } from "@/lib/potionRegistry";
@@ -103,7 +99,6 @@ interface ProjectFile {
   items: ItemSpec[];
   blocks: BlockSpec[];
   armors: ArmorSpec[];
-  entities: EntitySpec[];
   creativeTabs: CreativeTabSpec[];
   customAttributes: CustomAttributeSpec[];
   effects: EffectSpec[];
@@ -126,7 +121,6 @@ interface HistoryEntry {
   items: ItemSpec[];
   blocks: BlockSpec[];
   armors: ArmorSpec[];
-  entities: EntitySpec[];
   creativeTabs: CreativeTabSpec[];
   customAttributes: CustomAttributeSpec[];
   effects: EffectSpec[];
@@ -142,7 +136,6 @@ interface HistoryEntry {
   activeItemIdx: number;
   activeBlockIdx: number;
   activeArmorIdx: number;
-  activeEntityIdx: number;
   activeAttributeIdx: number;
   activeEffectIdx: number;
   activePotionIdx: number;
@@ -175,9 +168,9 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
     return {
       ...raw,
       history: (hist as ScreenSpec[]).map(s => ({
-        screens: [s], items: [], blocks: [], armors: [], entities: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
+        screens: [s], items: [], blocks: [], armors: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
         achievements: [], recipes: [], trades: [], lootEntries: [], biomes: [], dimensions: [],
-        activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeEntityIdx: 0, activeAttributeIdx: 0,
+        activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeAttributeIdx: 0,
         activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
         activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0,
       })),
@@ -190,7 +183,6 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
     items: (Array.isArray(e.items) ? e.items : []) as ItemSpec[],
     blocks: (Array.isArray(e.blocks) ? e.blocks : []) as BlockSpec[],
     armors: (Array.isArray(e.armors) ? e.armors : []) as ArmorSpec[],
-    entities: (Array.isArray(e.entities) ? e.entities : []) as EntitySpec[],
     creativeTabs: (Array.isArray(e.creativeTabs) ? e.creativeTabs : []) as CreativeTabSpec[],
     customAttributes: (Array.isArray(e.customAttributes) ? e.customAttributes : []) as CustomAttributeSpec[],
     effects: (Array.isArray(e.effects) ? e.effects : []) as EffectSpec[],
@@ -207,7 +199,6 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
     activeAttributeIdx: (e.activeAttributeIdx as number) ?? 0,
     activeBlockIdx: (e.activeBlockIdx as number) ?? 0,
     activeArmorIdx: (e.activeArmorIdx as number) ?? 0,
-    activeEntityIdx: (e.activeEntityIdx as number) ?? 0,
     activeEffectIdx: (e.activeEffectIdx as number) ?? 0,
     activePotionIdx: (e.activePotionIdx as number) ?? 0,
     activeAchievementIdx: (e.activeAchievementIdx as number) ?? 0,
@@ -239,10 +230,6 @@ function normalizeBlock(b: BlockSpec): BlockSpec {
 
 function normalizeArmor(a: ArmorSpec): ArmorSpec {
   return { ...ARMOR_DEFAULT, ...a };
-}
-
-function normalizeEntity(e: EntitySpec): EntitySpec {
-  return { ...ENTITY_DEFAULT, ...e };
 }
 
 function normalizeEffect(e: EffectSpec): EffectSpec {
@@ -300,9 +287,9 @@ function saveProjects(projects: StoredProject[]): void {
 const PLACEHOLDER_SCREEN: ScreenSpec = { id: "main", width: 350, height: 200, widgets: [] };
 const EMPTY_SESSION: SavedSession = {
   history: [{
-    screens: [PLACEHOLDER_SCREEN], items: [], blocks: [], armors: [], entities: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
+    screens: [PLACEHOLDER_SCREEN], items: [], blocks: [], armors: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
     achievements: [], recipes: [], trades: [], lootEntries: [], biomes: [], dimensions: [],
-    activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeEntityIdx: 0, activeAttributeIdx: 0,
+    activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeAttributeIdx: 0,
     activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
     activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0,
   }],
@@ -324,7 +311,7 @@ export default function EditorPage() {
   const [blockTemplates, setBlockTemplates] = useState<BlockTemplate[]>([]);
   const [attributePresets, setAttributePresets] = useState<AttributePreset[]>([]);
   const [textureEditorReturnTo, setTextureEditorReturnTo] = useState<
-    | { docType: "item" | "block" | "effect" | "entity"; index: number }
+    | { docType: "item" | "block" | "effect"; index: number }
     | { docType: "armor"; index: number; field: TexTarget }
     | null
   >(null);
@@ -364,7 +351,6 @@ export default function EditorPage() {
   const biomes = entry.biomes;
   const dimensions = entry.dimensions;
   const armors = entry.armors;
-  const entities = entry.entities;
   const activeDocType = entry.activeDocType;
   const activeItemIdx = entry.activeItemIdx;
   const activeBlockIdx = entry.activeBlockIdx;
@@ -378,7 +364,6 @@ export default function EditorPage() {
   const activeBiomeIdx = entry.activeBiomeIdx;
   const activeDimensionIdx = entry.activeDimensionIdx;
   const activeArmorIdx = entry.activeArmorIdx;
-  const activeEntityIdx = entry.activeEntityIdx;
   const activeItem = items[activeItemIdx] ?? null;
   const activeBlock = blocks[activeBlockIdx] ?? null;
   const activeCustomAttribute = customAttributes[activeAttributeIdx] ?? null;
@@ -391,7 +376,6 @@ export default function EditorPage() {
   const activeBiome = biomes[activeBiomeIdx] ?? null;
   const activeDimension = dimensions[activeDimensionIdx] ?? null;
   const activeArmor = armors[activeArmorIdx] ?? null;
-  const activeEntity = entities[activeEntityIdx] ?? null;
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [multiSelect, setMultiSelect] = useState<{ ids: string[] } | null>(null);
@@ -437,7 +421,6 @@ export default function EditorPage() {
       biomes: entry.biomes.map(normalizeBiome),
       dimensions: entry.dimensions.map(normalizeDimension),
       armors: entry.armors.map(normalizeArmor),
-      entities: entry.entities.map(normalizeEntity),
     }));
     setHistory(sanitizedHistory);
     setCursor(s.cursor);
@@ -929,10 +912,9 @@ export default function EditorPage() {
       biomes.find((b) => b.modId?.trim())?.modId?.trim() ||
       dimensions.find((d) => d.modId?.trim())?.modId?.trim() ||
       armors.find((a) => a.modId?.trim())?.modId?.trim() ||
-      entities.find((e) => e.modId?.trim())?.modId?.trim() ||
       projectKey
     );
-  }, [screens, items, blocks, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, entities, projectKey]);
+  }, [screens, items, blocks, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, projectKey]);
 
   const switchCustomAttribute = useCallback((idx: number) => {
     setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeAttributeIdx: idx, activeDocType: "attribute" } : e));
@@ -1264,37 +1246,6 @@ export default function EditorPage() {
     commit({ ...entry, armors: next, activeArmorIdx: newActiveArmorIdx });
   }, [entry, armors, activeArmorIdx, commit]);
 
-  const switchEntity = useCallback((idx: number) => {
-    setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeEntityIdx: idx, activeDocType: "entity" } : e));
-  }, [cursor]);
-
-  const addEntity = useCallback(() => {
-    const id = newSpecId("entity", entities);
-    commit({ ...entry, entities: [...entities, { ...ENTITY_DEFAULT, id }], activeEntityIdx: entities.length, activeDocType: "entity" });
-  }, [entry, entities, commit]);
-
-  const renameEntity = useCallback((idx: number, name: string) => {
-    commit({ ...entry, entities: entities.map((e, i) => i === idx ? { ...e, id: name } : e) });
-  }, [entry, entities, commit]);
-
-  const updateEntity = useCallback((idx: number, patch: Partial<EntitySpec>) => {
-    commit({ ...entry, entities: entities.map((e, i) => i === idx ? { ...e, ...patch } : e) });
-  }, [entry, entities, commit]);
-
-  const duplicateEntity = useCallback((idx: number) => {
-    const original = entities[idx];
-    if (!original) return;
-    const copy: EntitySpec = { ...original, id: duplicateSpecId(original.id, entities) };
-    const next = [...entities.slice(0, idx + 1), copy, ...entities.slice(idx + 1)];
-    commit({ ...entry, entities: next, activeEntityIdx: idx + 1, activeDocType: "entity" });
-  }, [entry, entities, commit]);
-
-  const removeEntity = useCallback((idx: number) => {
-    const next = entities.filter((_, i) => i !== idx);
-    const newActiveEntityIdx = Math.max(0, idx < activeEntityIdx ? activeEntityIdx - 1 : Math.min(activeEntityIdx, next.length - 1));
-    commit({ ...entry, entities: next, activeEntityIdx: newActiveEntityIdx });
-  }, [entry, entities, activeEntityIdx, commit]);
-
   const handleSaveAttributePreset = useCallback(() => {
     if (activeDocType !== "item" || !activeItem) return;
     if (!activeItem.attributes || activeItem.attributes.length === 0) {
@@ -1334,7 +1285,7 @@ export default function EditorPage() {
     });
   }, []);
 
-  const openTextureEditor = useCallback((returnTo?: { docType: "item" | "block" | "effect" | "entity"; index: number } | { docType: "armor"; index: number; field: TexTarget }) => {
+  const openTextureEditor = useCallback((returnTo?: { docType: "item" | "block" | "effect"; index: number } | { docType: "armor"; index: number; field: TexTarget }) => {
     setTextureEditorReturnTo(returnTo ?? null);
     setTextureEditorInitialKey(null);
     setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeDocType: "texture" } : e));
@@ -1359,13 +1310,11 @@ export default function EditorPage() {
       commit({ ...entry, items: items.map((it, i) => i === index ? { ...it, texture: key } : it), activeDocType: "item", activeItemIdx: index });
     } else if (textureEditorReturnTo.docType === "block") {
       commit({ ...entry, blocks: blocks.map((b, i) => i === index ? { ...b, texture: key } : b), activeDocType: "block", activeBlockIdx: index });
-    } else if (textureEditorReturnTo.docType === "entity") {
-      commit({ ...entry, entities: entities.map((en, i) => i === index ? { ...en, texture: key } : en), activeDocType: "entity", activeEntityIdx: index });
     } else {
       commit({ ...entry, effects: effects.map((ef, i) => i === index ? { ...ef, icon: key } : ef), activeDocType: "effect", activeEffectIdx: index });
     }
     setTextureEditorReturnTo(null);
-  }, [textureEditorReturnTo, entry, items, blocks, armors, entities, effects, commit]);
+  }, [textureEditorReturnTo, entry, items, blocks, armors, effects, commit]);
 
   const handleTextureEditorBack = useCallback(() => {
     const returnTo = textureEditorReturnTo;
@@ -1376,7 +1325,6 @@ export default function EditorPage() {
         if (returnTo.docType === "armor") return { ...e, activeDocType: "armor", activeArmorIdx: returnTo.index };
         if (returnTo.docType === "item") return { ...e, activeDocType: "item", activeItemIdx: returnTo.index };
         if (returnTo.docType === "block") return { ...e, activeDocType: "block", activeBlockIdx: returnTo.index };
-        if (returnTo.docType === "entity") return { ...e, activeDocType: "entity", activeEntityIdx: returnTo.index };
         return { ...e, activeDocType: "effect", activeEffectIdx: returnTo.index };
       }
       return { ...e, activeDocType: "screen" };
@@ -1645,16 +1593,6 @@ export default function EditorPage() {
     }
   }, [armors]);
 
-  const handleExportEntity = useCallback(async (idx: number) => {
-    try {
-      const target = entities[idx];
-      const json = JSON.stringify(target, null, 2);
-      await downloadExport(`${target.id}.json`, json, { entities: [target] });
-    } catch (e) {
-      alert(`Could not export: ${e instanceof Error ? e.message : e}`);
-    }
-  }, [entities]);
-
   const handleExportAllScreens = useCallback(async () => {
     try {
       const exportedScreens = screens.map(buildExportedScreen);
@@ -1773,15 +1711,6 @@ export default function EditorPage() {
     }
   }, [armors, friendlyModId]);
 
-  const handleExportAllEntities = useCallback(async () => {
-    try {
-      const json = JSON.stringify(entities, null, 2);
-      await downloadExport(`${friendlyModId()}.entities.json`, json, { entities });
-    } catch (e) {
-      alert(`Could not export: ${e instanceof Error ? e.message : e}`);
-    }
-  }, [entities, friendlyModId]);
-
   const handleCopyJava = useCallback(async () => {
     try {
       const java = generateJavaClass(screen);
@@ -1835,7 +1764,6 @@ export default function EditorPage() {
         biomes,
         dimensions,
         armors,
-        entities,
         appVersion: APP_VERSION,
       };
       const json = JSON.stringify(project, null, 2);
@@ -1843,12 +1771,12 @@ export default function EditorPage() {
       const friendlyName = screens.find((s) => s.modId?.trim())?.modId?.trim() || projectKey;
       await downloadFullProjectExport(friendlyName, json, {
         screens: exportedScreens, items, blocks, creativeTabs, customAttributes, effects, potions,
-        achievements, recipes, trades, lootEntries, biomes, dimensions, armors, entities,
+        achievements, recipes, trades, lootEntries, biomes, dimensions, armors,
       });
     } catch (e) {
       alert(`Could not export project: ${e instanceof Error ? e.message : e}`);
     }
-  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, entities]);
+  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors]);
 
   const handleImportProjectClick = () => importProjectRef.current?.click();
   const handleImportProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1878,17 +1806,16 @@ export default function EditorPage() {
         const importedBiomes = (Array.isArray(migrated.biomes) ? migrated.biomes : []).map(normalizeBiome);
         const importedDimensions = (Array.isArray(migrated.dimensions) ? migrated.dimensions : []).map(normalizeDimension);
         const importedArmors = (Array.isArray(migrated.armors) ? migrated.armors : []).map(normalizeArmor);
-        const importedEntities = (Array.isArray(migrated.entities) ? migrated.entities : []).map(normalizeEntity);
         commit({
           ...entry,
           screens: importedScreens, items: importedItems, blocks: importedBlocks,
           creativeTabs: importedCreativeTabs, customAttributes: importedCustomAttributes,
           effects: importedEffects, potions: importedPotions,
           achievements: importedAchievements, recipes: importedRecipes, trades: importedTrades, lootEntries: importedLootEntries,
-          biomes: importedBiomes, dimensions: importedDimensions, armors: importedArmors, entities: importedEntities,
+          biomes: importedBiomes, dimensions: importedDimensions, armors: importedArmors,
           activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeAttributeIdx: 0,
           activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
-          activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0, activeArmorIdx: 0, activeEntityIdx: 0,
+          activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0, activeArmorIdx: 0,
         });
         setSelectedId(null);
       } catch {
@@ -2073,15 +2000,6 @@ export default function EditorPage() {
             onDuplicateArmor={duplicateArmor}
             onExportArmor={handleExportArmor}
             onExportAllArmors={handleExportAllArmors}
-            entities={entities}
-            activeEntityIdx={activeEntityIdx}
-            onSelectEntity={switchEntity}
-            onAddEntity={addEntity}
-            onRenameEntity={renameEntity}
-            onRemoveEntity={removeEntity}
-            onDuplicateEntity={duplicateEntity}
-            onExportEntity={handleExportEntity}
-            onExportAllEntities={handleExportAllEntities}
             onOpenTextureEditor={() => openTextureEditor()}
             onOpenExistingTexture={openExistingTexture}
             onAddWidget={addWidget}
@@ -2190,8 +2108,6 @@ export default function EditorPage() {
                         ? blocks[textureEditorReturnTo.index]?.id
                         : textureEditorReturnTo.docType === "armor"
                         ? armors[textureEditorReturnTo.index]?.id
-                        : textureEditorReturnTo.docType === "entity"
-                        ? entities[textureEditorReturnTo.index]?.id
                         : effects[textureEditorReturnTo.index]?.id) ?? "texture")
                     : textureEditorInitialKey
                     ? textureEditorInitialKey.replace(/^custom\//, "").replace(/\.[^./]+$/, "")
@@ -2316,17 +2232,6 @@ export default function EditorPage() {
                   />
                 </div>
               </div>
-            ) : activeDocType === "entity" ? (
-              <div className="flex-1 overflow-y-auto p-4">
-                <div className="mx-auto max-w-3xl">
-                  <EntityPropertyPanel
-                    entity={activeEntity}
-                    creativeTabs={creativeTabs}
-                    onUpdate={(patch) => updateEntity(activeEntityIdx, patch)}
-                    onOpenTextureEditor={() => openTextureEditor({ docType: "entity", index: activeEntityIdx })}
-                  />
-                </div>
-              </div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="mx-auto max-w-3xl">
@@ -2400,10 +2305,6 @@ export default function EditorPage() {
                 ) : activeDocType === "armor" ? (
                   <div className="flex flex-1 items-center justify-center p-4">
                     <ArmorPreview armor={activeArmor} />
-                  </div>
-                ) : activeDocType === "entity" ? (
-                  <div className="flex flex-1 items-center justify-center p-4">
-                    <EntityPreview entity={activeEntity} />
                   </div>
                 ) : (
                   <div className="flex flex-1 items-center justify-center p-4">

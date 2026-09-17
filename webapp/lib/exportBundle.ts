@@ -3,7 +3,7 @@ import { loadAllTextures } from "./textureStore";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, BlockFaceKey, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
   AchievementSpec, RecipeSpec, TradeSpec, TradeItemStack, LootEntrySpec, BiomeSpec, DimensionSpec,
-  ArmorSpec, EntitySpec,
+  ArmorSpec,
 } from "./types";
 import { BIOME_TEMPLATES } from "./biomeTemplates";
 import { DIMENSION_TYPE_TEMPLATES } from "./dimensionTemplates";
@@ -92,40 +92,6 @@ function equipmentAssetJson(modId: string, armorId: string): string {
     { layers: { humanoid: [{ texture: `${modId}:${armorId}` }], humanoid_leggings: [{ texture: `${modId}:${armorId}` }] } },
     null, 2
   );
-}
-
-// --- Entities — spawn egg item model/definition, same "item/generated" idiom as a regular item
-// (verified against the real client jar's zombie_spawn_egg.json/model). The entity's own skin
-// texture (assets/<modId>/textures/entity/<id>.png) just needs bundling like any other texture,
-// no model file of its own — that geometry lives in the Java-side body template, not a resource.
-
-function spawnEggModelJson(modId: string, entityId: string): string {
-  return JSON.stringify(
-    { parent: "item/generated", textures: { layer0: `${modId}:item/${entityId}_spawn_egg` } },
-    null, 2
-  );
-}
-
-/** Synthesizes a flat two-tone 16x16 spawn-egg icon from the spec's two hex colors — this MC
- * version's SpawnEggItem has no runtime color-tint mechanism any more (verified: the decompiled
- * class has zero color fields), so the icon has to be a real baked PNG like every other item
- * texture. Not a vanilla-identical dither pattern, just a plain base + spot-ring placeholder. */
-async function spawnEggIconBlob(primaryHex: string, secondaryHex: string): Promise<Blob> {
-  const size = 16;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = primaryHex || "#3c8527";
-  ctx.beginPath();
-  ctx.ellipse(size / 2, size / 2, size / 2 - 1, size / 2 - 1, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = secondaryHex || "#1a381a";
-  const spots: [number, number][] = [[5, 4], [10, 6], [4, 10], [9, 11], [12, 9]];
-  for (const [x, y] of spots) ctx.fillRect(x, y, 2, 2);
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/png");
-  });
 }
 
 // --- Item model *definitions* (assets/<modid>/items/<id>.json) — this MC version's newer,
@@ -418,14 +384,13 @@ export interface ExportBundleInput {
   biomes?: BiomeSpec[];
   dimensions?: DimensionSpec[];
   armors?: ArmorSpec[];
-  entities?: EntitySpec[];
 }
 
 interface ResolvedInput {
   screens: ScreenSpec[]; items: ItemSpec[]; blocks: BlockSpec[]; creativeTabs: CreativeTabSpec[];
   customAttributes: CustomAttributeSpec[]; effects: EffectSpec[]; potions: PotionSpec[];
   achievements: AchievementSpec[]; recipes: RecipeSpec[]; trades: TradeSpec[]; lootEntries: LootEntrySpec[];
-  biomes: BiomeSpec[]; dimensions: DimensionSpec[]; armors: ArmorSpec[]; entities: EntitySpec[];
+  biomes: BiomeSpec[]; dimensions: DimensionSpec[]; armors: ArmorSpec[];
 }
 
 function resolveInput(input: ExportBundleInput): ResolvedInput {
@@ -435,15 +400,13 @@ function resolveInput(input: ExportBundleInput): ResolvedInput {
     effects: input.effects ?? [], potions: input.potions ?? [], achievements: input.achievements ?? [],
     recipes: input.recipes ?? [], trades: input.trades ?? [], lootEntries: input.lootEntries ?? [],
     biomes: input.biomes ?? [], dimensions: input.dimensions ?? [], armors: input.armors ?? [],
-    entities: input.entities ?? [],
   };
 }
 
 function hasAnyGeneratedContent(r: ResolvedInput): boolean {
   return r.items.length > 0 || r.blocks.length > 0 || r.customAttributes.length > 0 || r.effects.length > 0 ||
     r.potions.length > 0 || r.achievements.length > 0 || r.recipes.length > 0 || r.trades.length > 0 ||
-    r.lootEntries.length > 0 || r.biomes.length > 0 || r.dimensions.length > 0 || r.armors.length > 0 ||
-    r.entities.length > 0;
+    r.lootEntries.length > 0 || r.biomes.length > 0 || r.dimensions.length > 0 || r.armors.length > 0;
 }
 
 function collectAllSrcs(r: ResolvedInput): Set<string> {
@@ -463,7 +426,6 @@ function collectAllSrcs(r: ResolvedInput): Set<string> {
     if (a.iconBoots) srcs.add(a.iconBoots);
     if (a.equipmentTexture) srcs.add(a.equipmentTexture);
   }
-  for (const e of r.entities) if (e.texture) srcs.add(e.texture);
   return srcs;
 }
 
@@ -481,7 +443,6 @@ function resolveModId(r: ResolvedInput): string {
     r.biomes.find((b) => b.modId?.trim())?.modId?.trim() ||
     r.dimensions.find((d) => d.modId?.trim())?.modId?.trim() ||
     r.armors.find((a) => a.modId?.trim())?.modId?.trim() ||
-    r.entities.find((e) => e.modId?.trim())?.modId?.trim() ||
     "minecraft"
   );
 }
@@ -506,7 +467,7 @@ function resolveDimensionBiomeOverride(modId: string, d: DimensionSpec, biomes: 
  * real files one level down rather than duplicating this generation logic. Returns how many
  * textures got bundled (used by the caller to decide whether a zip is even worth producing).
  */
-async function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: ResolvedInput, allTextures: Record<string, Blob>): Promise<number> {
+function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: ResolvedInput, allTextures: Record<string, Blob>): number {
   let bundled = 0;
   for (const src of collectAllSrcs(r)) {
     const blob = allTextures[`pack:${src}`];
@@ -621,18 +582,6 @@ async function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r:
   }
   if (r.armors.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/armors.json`, JSON.stringify(r.armors, null, 2));
 
-  for (const entity of r.entities) {
-    if (entity.texture) {
-      const blob = allTextures[`pack:${entity.texture}`];
-      if (blob) zip.file(`${prefix}assets/${modId}/textures/entity/${entity.id}.png`, blob);
-    }
-    zip.file(`${prefix}assets/${modId}/models/item/${entity.id}_spawn_egg.json`, spawnEggModelJson(modId, entity.id));
-    zip.file(`${prefix}assets/${modId}/items/${entity.id}_spawn_egg.json`, itemDefinitionJson(`${modId}:item/${entity.id}_spawn_egg`));
-    const eggIcon = await spawnEggIconBlob(entity.spawnEggPrimaryColor, entity.spawnEggSecondaryColor);
-    zip.file(`${prefix}assets/${modId}/textures/item/${entity.id}_spawn_egg.png`, eggIcon);
-  }
-  if (r.entities.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/entities.json`, JSON.stringify(r.entities, null, 2));
-
   return bundled;
 }
 
@@ -666,7 +615,7 @@ export async function downloadExport(jsonFilename: string, json: string, input: 
 
   const zip = new JSZip();
   zip.file(jsonFilename, json);
-  const bundled = await writeGeneratedFiles(zip, "", modId, r, allTextures);
+  const bundled = writeGeneratedFiles(zip, "", modId, r, allTextures);
 
   if (bundled === 0 && !needsGeneratedAssets) {
     // Referenced textures aren't loaded in this browser (no pack extracted this session) —
@@ -766,10 +715,6 @@ function writeArchiveCopies(zip: JSZip, prefix: string, modId: string, r: Resolv
     zip.file(`${prefix}Armor/${armor.id}/spec.json`, JSON.stringify(armor, null, 2));
     if (armor.equipmentTexture) zip.file(`${prefix}Armor/${armor.id}/equipment.json`, equipmentAssetJson(modId, armor.id));
   }
-  for (const entity of r.entities) {
-    zip.file(`${prefix}Entities/${entity.id}/spec.json`, JSON.stringify(entity, null, 2));
-    zip.file(`${prefix}Entities/${entity.id}/spawn_egg_model.json`, spawnEggModelJson(modId, entity.id));
-  }
 }
 
 /**
@@ -789,7 +734,7 @@ export async function downloadFullProjectExport(projectName: string, projectJson
 
   const zip = new JSZip();
   zip.file(`${root}${projectName}.json`, projectJson);
-  await writeGeneratedFiles(zip, root, modId, r, allTextures);
+  writeGeneratedFiles(zip, root, modId, r, allTextures);
   writeArchiveCopies(zip, `${root}Ressources/`, modId, r, allTextures);
 
   const zipBlob = await zip.generateAsync({ type: "blob" });

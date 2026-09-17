@@ -20,9 +20,6 @@ import sheepfromheaven.screenspec.runtime.effect.EffectSpec;
 import sheepfromheaven.screenspec.runtime.effect.EffectSpecLoader;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpec;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpecLoader;
-import sheepfromheaven.screenspec.runtime.entity.EntitySpec;
-import sheepfromheaven.screenspec.runtime.entity.EntitySpecLoader;
-import sheepfromheaven.screenspec.runtime.entity.EntitySpecs;
 import sheepfromheaven.screenspec.runtime.item.ItemSpec;
 import sheepfromheaven.screenspec.runtime.item.ItemSpecLoader;
 import sheepfromheaven.screenspec.test.ModMenuTypes;
@@ -62,13 +59,9 @@ public class ScreenSpecMod {
             List<EffectSpec> effects = EffectSpecLoader.fromClasspath(namespace);
             List<PotionSpec> potions = PotionSpecLoader.fromClasspath(namespace);
             List<ArmorSpec> armors = ArmorSpecLoader.fromClasspath(namespace);
-            List<EntitySpec> entities = EntitySpecLoader.fromClasspath(namespace);
             if (items.isEmpty() && blocks.isEmpty() && customAttributes.isEmpty() && effects.isEmpty()
-                    && potions.isEmpty() && armors.isEmpty() && entities.isEmpty()) continue;
-            ModContent.register(namespace, modBus, items, blocks, customAttributes, effects, potions, armors, entities);
-            if (FMLEnvironment.getDist() == Dist.CLIENT && !entities.isEmpty()) {
-                EntitySpecs.registerRenderers(modBus, namespace, entities);
-            }
+                    && potions.isEmpty() && armors.isEmpty()) continue;
+            ModContent.register(namespace, modBus, items, blocks, customAttributes, effects, potions, armors);
         }
     }
 
