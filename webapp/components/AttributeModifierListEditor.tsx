@@ -25,24 +25,24 @@ export default function AttributeModifierListEditor({
       {attributes.length === 0 && (
         <div className="text-[10px] text-muted-foreground italic">No stat modifiers yet.</div>
       )}
-      {attributes.map((attr, i) => (
-        <div key={i} className="flex flex-col gap-1 rounded border border-input p-1.5">
-          <div className="flex items-center gap-1">
-            <PropSelect
-              value={attr.attribute}
-              options={attributeOptions}
-              labels={attributeLabels}
-              onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, attribute: v } : a))}
-            />
-            <button
-              title="Remove"
-              onClick={() => onChange(attributes.filter((_, j) => j !== i))}
-              className="shrink-0 text-muted-foreground hover:text-destructive px-1"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-1">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1.5">
+        {attributes.map((attr, i) => (
+          <div key={i} className="flex flex-col gap-1 rounded border border-input p-1.5">
+            <div className="flex items-center gap-1">
+              <PropSelect
+                value={attr.attribute}
+                options={attributeOptions}
+                labels={attributeLabels}
+                onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, attribute: v } : a))}
+              />
+              <button
+                title="Remove"
+                onClick={() => onChange(attributes.filter((_, j) => j !== i))}
+                className="shrink-0 text-muted-foreground hover:text-destructive px-1"
+              >
+                ✕
+              </button>
+            </div>
             <Field label="Amount">
               <NumInput value={attr.amount} onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, amount: v } : a))} />
             </Field>
@@ -53,16 +53,16 @@ export default function AttributeModifierListEditor({
                 onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, slot: v as typeof a.slot } : a))}
               />
             </Field>
+            <Field label="Operation">
+              <PropSelect
+                value={attr.operation}
+                options={ATTRIBUTE_OPERATION_OPTIONS}
+                onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, operation: v as typeof a.operation } : a))}
+              />
+            </Field>
           </div>
-          <Field label="Operation">
-            <PropSelect
-              value={attr.operation}
-              options={ATTRIBUTE_OPERATION_OPTIONS}
-              onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, operation: v as typeof a.operation } : a))}
-            />
-          </Field>
-        </div>
-      ))}
+        ))}
+      </div>
       <button
         className="w-full rounded border border-dashed border-input py-0.5 text-muted-foreground hover:border-foreground/40 hover:text-foreground"
         onClick={() => onChange([

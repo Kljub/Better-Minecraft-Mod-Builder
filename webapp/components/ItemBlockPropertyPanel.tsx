@@ -288,38 +288,40 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
           {damageStages.length === 0 && (
             <div className="text-[10px] text-muted-foreground italic mb-1">No damage stages yet — icon stays the same regardless of wear.</div>
           )}
-          {damageStages.map((stage, i) => {
-            const texUrl = stage.texture ? packTextures[stage.texture] : undefined;
-            return (
-              <div key={i} className="flex items-center gap-1 mb-1">
-                <button
-                  type="button"
-                  title={stage.texture ? `${stage.texture} — click to change` : "Click to pick a texture"}
-                  onClick={() => setStagePickerFor(i)}
-                  className="h-6 w-6 shrink-0 overflow-hidden rounded border border-input bg-[#8b8b8b]"
-                  style={{ imageRendering: "pixelated" }}
-                >
-                  {texUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={texUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
-                  )}
-                </button>
-                <div className="w-20 shrink-0">
-                  <NumInput
-                    value={stage.threshold}
-                    onChange={(v) => setDamageStages(damageStages.map((s, j) => j === i ? { ...s, threshold: Math.min(1, Math.max(0, v)) } : s))}
-                  />
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-1.5 mb-1">
+            {damageStages.map((stage, i) => {
+              const texUrl = stage.texture ? packTextures[stage.texture] : undefined;
+              return (
+                <div key={i} className="flex items-center gap-1 rounded border border-input p-1">
+                  <button
+                    type="button"
+                    title={stage.texture ? `${stage.texture} — click to change` : "Click to pick a texture"}
+                    onClick={() => setStagePickerFor(i)}
+                    className="h-6 w-6 shrink-0 overflow-hidden rounded border border-input bg-[#8b8b8b]"
+                    style={{ imageRendering: "pixelated" }}
+                  >
+                    {texUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={texUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
+                    )}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <NumInput
+                      value={stage.threshold}
+                      onChange={(v) => setDamageStages(damageStages.map((s, j) => j === i ? { ...s, threshold: Math.min(1, Math.max(0, v)) } : s))}
+                    />
+                  </div>
+                  <button
+                    title="Remove"
+                    onClick={() => setDamageStages(damageStages.filter((_, j) => j !== i))}
+                    className="shrink-0 text-muted-foreground hover:text-destructive px-1"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  title="Remove"
-                  onClick={() => setDamageStages(damageStages.filter((_, j) => j !== i))}
-                  className="shrink-0 text-muted-foreground hover:text-destructive px-1"
-                >
-                  ✕
-                </button>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
           <button
             className="w-full rounded border border-dashed border-input py-0.5 text-muted-foreground hover:border-foreground/40 hover:text-foreground"
             onClick={() => setDamageStages([...damageStages, { threshold: 0.5, texture: "" }])}
