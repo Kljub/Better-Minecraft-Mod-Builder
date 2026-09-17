@@ -494,3 +494,38 @@ export interface ArmorSpec {
   rarity: "common" | "uncommon" | "rare" | "epic";
   appVersion?: string;
 }
+
+export type EntityBodyTemplate = "zombie" | "skeleton" | "spider" | "creeper";
+export type EntityMobCategory = "monster" | "creature" | "ambient" | "misc";
+
+/**
+ * A custom mob. There's no code-gen step in neoforge-runtime, so "own entity class/renderer"
+ * is delivered as one shared Java class pair per `bodyTemplate` (e.g. `TemplateZombieEntity`/
+ * `TemplateZombieRenderer`), each instantiated once per spec with its own `EntityType`,
+ * attributes, hitbox and texture — not a bespoke class per spec. AI goals are inherited
+ * wholesale from the vanilla template (a separate AI system is being built outside this tool);
+ * natural biome spawning isn't wired either — v1 mobs are spawn-egg/`/summon` only. See
+ * neoforge-runtime's EntitySpecs.java.
+ */
+export interface EntitySpec {
+  id: string;
+  modId?: string;
+  displayName: string;
+  bodyTemplate: EntityBodyTemplate;
+  /** pack texture key — must match the chosen template's vanilla skin UV layout */
+  texture: string;
+  mobCategory: EntityMobCategory;
+  maxHealth: number;
+  movementSpeed: number;
+  attackDamage: number;
+  hitboxWidth: number;
+  hitboxHeight: number;
+  fireImmune: boolean;
+  /** "#RRGGBB" — webapp-only, bakes the spawn-egg icon PNG at export time; Java never sees these
+   * (this MC version's SpawnEggItem has no runtime color-tint mechanism any more) */
+  spawnEggPrimaryColor: string;
+  spawnEggSecondaryColor: string;
+  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id */
+  creativeTab: string;
+  appVersion?: string;
+}

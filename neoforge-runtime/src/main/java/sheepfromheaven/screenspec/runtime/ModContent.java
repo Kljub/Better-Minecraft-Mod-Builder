@@ -5,6 +5,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.effect.MobEffect;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.Attribute;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.CreativeModeTabs;
@@ -27,6 +28,8 @@ import sheepfromheaven.screenspec.runtime.effect.EffectSpec;
 import sheepfromheaven.screenspec.runtime.effect.EffectSpecs;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpec;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpecs;
+import sheepfromheaven.screenspec.runtime.entity.EntitySpec;
+import sheepfromheaven.screenspec.runtime.entity.EntitySpecs;
 import sheepfromheaven.screenspec.runtime.item.ItemSpec;
 import sheepfromheaven.screenspec.runtime.item.ItemSpecs;
 
@@ -38,8 +41,8 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * Registers every Item/Block/custom-Attribute/Effect/Potion a mod's exported manifest describes,
- * and wires each item/block into its chosen creative-inventory tab — either an existing vanilla
+ * Registers every Item/Block/custom-Attribute/Effect/Potion/Armor/Entity a mod's exported manifest
+ * describes, and wires each item/block into its chosen creative-inventory tab — either an existing vanilla
  * tab, the shared "custom" tab (one per modId, used when an item/block's {@code creativeTab} is
  * absent or literally {@code "custom"}), or a project-defined named tab (any other string — one
  * {@code DeferredRegister<CreativeModeTab>} entry per distinct id, titled with that id). Called
@@ -65,13 +68,14 @@ public final class ModContent {
     private ModContent() {}
 
     /** Registers {@code items}, {@code blocks}, {@code customAttributes}, {@code effects},
-     * {@code potions} and {@code armors} under {@code modId}, subscribed to {@code modBus}. */
+     * {@code potions}, {@code armors} and {@code entities} under {@code modId}, subscribed to
+     * {@code modBus}. */
     public static void register(
             String modId, IEventBus modBus,
             List<ItemSpec> items, List<BlockSpec> blocks, List<CustomAttributeSpec> customAttributes,
-            List<EffectSpec> effects, List<PotionSpec> potions, List<ArmorSpec> armors) {
+            List<EffectSpec> effects, List<PotionSpec> potions, List<ArmorSpec> armors, List<EntitySpec> entities) {
         if (items.isEmpty() && blocks.isEmpty() && customAttributes.isEmpty() && effects.isEmpty()
-                && potions.isEmpty() && armors.isEmpty()) return;
+                && potions.isEmpty() && armors.isEmpty() && entities.isEmpty()) return;
 
         Map<String, Holder<Attribute>> registeredAttributes = Collections.emptyMap();
         if (!customAttributes.isEmpty()) {
@@ -102,20 +106,29 @@ public final class ModContent {
         Map<String, DeferredBlock<Block>> registeredBlocks = BlockSpecs.registerAll(blockRegister, itemRegister, blocks);
         Map<String, DeferredItem<Item>> registeredArmorPieces = ArmorSpecs.registerAll(armorRegister, armors, modId);
 
+        Map<String, DeferredItem<Item>> registeredSpawnEggs = Collections.emptyMap();
+        if (!entities.isEmpty()) {
+            DeferredRegister<EntityType<?>> entityRegister = EntitySpecs.createRegister(modId);
+            var registeredEntityTypes = EntitySpecs.registerAll(entityRegister, entities, modId);
+            entityRegister.register(modBus);
+            registeredSpawnEggs = EntitySpecs.registerSpawnEggs(itemRegister, entities, registeredEntityTypes);
+            EntitySpecs.registerAttributes(modBus, entities, registeredEntityTypes);
+        }
+
         itemRegister.register(modBus);
         blockRegister.register(modBus);
         armorRegister.register(modBus);
 
-        registerCreativeTabContent(modId, modBus, items, blocks, armors, registeredItems, registeredBlocks, registeredArmorPieces);
+        registerCreativeTabContent(modId, modBus, items, blocks, armors, entities, registeredItems, registeredBlocks, registeredArmorPieces, registeredSpawnEggs);
     }
 
     private static final String[] ARMOR_PIECES = { "helmet", "chestplate", "leggings", "boots" };
 
     private static void registerCreativeTabContent(
             String modId, IEventBus modBus,
-            List<ItemSpec> items, List<BlockSpec> blocks, List<ArmorSpec> armors,
+            List<ItemSpec> items, List<BlockSpec> blocks, List<ArmorSpec> armors, List<EntitySpec> entities,
             Map<String, DeferredItem<Item>> registeredItems, Map<String, DeferredBlock<Block>> registeredBlocks,
-            Map<String, DeferredItem<Item>> registeredArmorPieces) {
+            Map<String, DeferredItem<Item>> registeredArmorPieces, Map<String, DeferredItem<Item>> registeredSpawnEggs) {
 
         // Keyed by the item/block/armor's raw `creativeTab` string — "custom" is just another id
         // here (its own single-entry tab, titled after modId below), same treatment as any other
@@ -140,6 +153,11 @@ public final class ModContent {
                 if (item == null) continue;
                 addToTab(spec.creativeTab, item::toStack, namedTabEntries, vanillaTabEntries);
             }
+        }
+        for (EntitySpec spec : entities) {
+            DeferredItem<Item> egg = registeredSpawnEggs.get(spec.id);
+            if (egg == null) continue;
+            addToTab(spec.creativeTab, egg::toStack, namedTabEntries, vanillaTabEntries);
         }
 
         if (!vanillaTabEntries.isEmpty()) {

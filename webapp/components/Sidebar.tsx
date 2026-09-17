@@ -31,13 +31,13 @@ import LayersTree from "@/components/LayersTree";
 import { useTextures } from "@/lib/TextureContext";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
-  AchievementSpec, RecipeSpec, TradeSpec, LootEntrySpec, BiomeSpec, DimensionSpec, ArmorSpec,
+  AchievementSpec, RecipeSpec, TradeSpec, LootEntrySpec, BiomeSpec, DimensionSpec, ArmorSpec, EntitySpec,
 } from "@/lib/types";
 import type { ScreenTemplate, ItemTemplate, BlockTemplate } from "@/lib/templates";
 import type { AttributePreset } from "@/lib/attributePresets";
 
 export type ActiveDocType =
-  | "screen" | "item" | "block" | "armor" | "attribute" | "effect" | "potion" | "texture"
+  | "screen" | "item" | "block" | "armor" | "entity" | "attribute" | "effect" | "potion" | "texture"
   | "achievement" | "recipe" | "trade" | "loot" | "biome" | "dimension";
 
 interface TemplateListItem {
@@ -91,6 +91,16 @@ interface Props {
   onDuplicateArmor: (idx: number) => void;
   onExportArmor: (idx: number) => void;
   onExportAllArmors: () => void;
+
+  entities: EntitySpec[];
+  activeEntityIdx: number;
+  onSelectEntity: (idx: number) => void;
+  onAddEntity: () => void;
+  onRenameEntity: (idx: number, name: string) => void;
+  onRemoveEntity: (idx: number) => void;
+  onDuplicateEntity: (idx: number) => void;
+  onExportEntity: (idx: number) => void;
+  onExportAllEntities: () => void;
 
   templates: ScreenTemplate[];
   itemTemplates: ItemTemplate[];
@@ -347,6 +357,7 @@ export default function AppSidebar({
   onSelectItem, onAddItem, onRemoveItem, onRenameItem, onDuplicateItem, onExportItem, onExportAllItems,
   onSelectBlock, onAddBlock, onRemoveBlock, onRenameBlock, onDuplicateBlock, onExportBlock, onExportAllBlocks,
   armors, activeArmorIdx, onSelectArmor, onAddArmor, onRenameArmor, onRemoveArmor, onDuplicateArmor, onExportArmor, onExportAllArmors,
+  entities, activeEntityIdx, onSelectEntity, onAddEntity, onRenameEntity, onRemoveEntity, onDuplicateEntity, onExportEntity, onExportAllEntities,
   templates, itemTemplates, blockTemplates, onSaveTemplate, onInsertTemplate, onRenameTemplate, onDeleteTemplate,
   creativeTabs, onAddCreativeTab, onRenameCreativeTab, onRemoveCreativeTab,
   attributePresets, onSaveAttributePreset, onApplyAttributePreset, onRenameAttributePreset, onDeleteAttributePreset,
@@ -372,6 +383,7 @@ export default function AppSidebar({
   const [itemsOpen, setItemsOpen] = useState(false);
   const [blocksOpen, setBlocksOpen] = useState(false);
   const [armorsOpen, setArmorsOpen] = useState(false);
+  const [entitiesOpen, setEntitiesOpen] = useState(false);
   const [creativeTabsOpen, setCreativeTabsOpen] = useState(false);
   const [attributePresetsOpen, setAttributePresetsOpen] = useState(false);
   const [customAttributesOpen, setCustomAttributesOpen] = useState(false);
@@ -401,7 +413,7 @@ export default function AppSidebar({
   // collapse the previously-focused group back closed when returning to the full overview, so it
   // doesn't come back already expanded next time (it was opened as a side effect of focusing it).
   const GROUP_SETTERS: Record<string, ((fn: (v: boolean) => boolean) => void) | undefined> = {
-    screens: setScreensOpen, items: setItemsOpen, blocks: setBlocksOpen, armors: setArmorsOpen, creativeTabs: setCreativeTabsOpen,
+    screens: setScreensOpen, items: setItemsOpen, blocks: setBlocksOpen, armors: setArmorsOpen, entities: setEntitiesOpen, creativeTabs: setCreativeTabsOpen,
     attributePresets: setAttributePresetsOpen, customAttributes: setCustomAttributesOpen,
     effects: setEffectsOpen, potions: setPotionsOpen, achievements: setAchievementsOpen,
     recipes: setRecipesOpen, trades: setTradesOpen, lootEntries: setLootEntriesOpen,
@@ -412,7 +424,7 @@ export default function AppSidebar({
     setFocusedGroup(null);
   };
   const GROUP_LABELS: Record<string, string> = {
-    screens: "Screens", items: "Items", blocks: "Blocks", armors: "Armor", creativeTabs: "Creative Tabs",
+    screens: "Screens", items: "Items", blocks: "Blocks", armors: "Armor", entities: "Entities", creativeTabs: "Creative Tabs",
     attributePresets: "Attribute Presets", customAttributes: "Custom Attributes",
     effects: "Effects", potions: "Potions", achievements: "Achievements", recipes: "Crafting Recipes",
     trades: "Trading", lootEntries: "Loot Tables", biomes: "Biomes", dimensions: "Dimensions",
@@ -435,6 +447,10 @@ export default function AppSidebar({
   const [renamingArmorIdx, setRenamingArmorIdx] = useState<number | null>(null);
   const [armorRenameValue, setArmorRenameValue] = useState("");
   const armorRenameRef = useRef<HTMLInputElement>(null);
+
+  const [renamingEntityIdx, setRenamingEntityIdx] = useState<number | null>(null);
+  const [entityRenameValue, setEntityRenameValue] = useState("");
+  const entityRenameRef = useRef<HTMLInputElement>(null);
 
   const [renamingTabIdx, setRenamingTabIdx] = useState<number | null>(null);
   const [tabRenameValue, setTabRenameValue] = useState("");
@@ -528,6 +544,15 @@ export default function AppSidebar({
   const commitArmorRename = () => {
     if (renamingArmorIdx !== null && armorRenameValue.trim()) onRenameArmor(renamingArmorIdx, armorRenameValue.trim());
     setRenamingArmorIdx(null);
+  };
+
+  useEffect(() => {
+    if (renamingEntityIdx !== null) entityRenameRef.current?.focus();
+  }, [renamingEntityIdx]);
+  const startEntityRename = (idx: number) => { setRenamingEntityIdx(idx); setEntityRenameValue(entities[idx].id); };
+  const commitEntityRename = () => {
+    if (renamingEntityIdx !== null && entityRenameValue.trim()) onRenameEntity(renamingEntityIdx, entityRenameValue.trim());
+    setRenamingEntityIdx(null);
   };
 
   useEffect(() => {
@@ -900,6 +925,50 @@ export default function AppSidebar({
         </SidebarGroup>
 
         <SidebarSeparator className={showGroup("armors") ? undefined : "hidden"} />
+
+        {/* ── Entities ───────────────────────────────────────── */}
+        <SidebarGroup className={showGroup("entities") ? undefined : "hidden"}>
+          <SidebarGroupLabel className="cursor-pointer select-none" onClick={() => groupLabelClick("entities", setEntitiesOpen)}>
+            {entitiesOpen ? <ChevronDown className="mr-1 h-3.5 w-3.5" /> : <ChevronRight className="mr-1 h-3.5 w-3.5" />}
+            Entities
+          </SidebarGroupLabel>
+          <SidebarGroupAction title="Export all entities" onClick={onExportAllEntities} className="right-8">
+            <Download />
+          </SidebarGroupAction>
+          <SidebarGroupAction title="Add entity" onClick={onAddEntity}>
+            <Plus />
+          </SidebarGroupAction>
+          {entitiesOpen && (
+            <SidebarGroupContent>
+              {entities.length === 0 ? (
+                <div className="px-3 py-1.5 text-xs text-muted-foreground">No entities yet.</div>
+              ) : (
+                <SidebarMenu>
+                  {entities.map((e, idx) => (
+                    <SimpleListRow
+                      key={idx}
+                      label={e.id}
+                      isActive={activeDocType === "entity" && idx === activeEntityIdx}
+                      isRenaming={renamingEntityIdx === idx}
+                      renameValue={entityRenameValue}
+                      renameRef={entityRenameRef}
+                      onSelect={() => onSelectEntity(idx)}
+                      onStartRename={() => startEntityRename(idx)}
+                      onRenameChange={setEntityRenameValue}
+                      onCommitRename={commitEntityRename}
+                      onCancelRename={() => setRenamingEntityIdx(null)}
+                      onExport={() => onExportEntity(idx)}
+                      onDuplicate={() => onDuplicateEntity(idx)}
+                      onDelete={() => onRemoveEntity(idx)}
+                    />
+                  ))}
+                </SidebarMenu>
+              )}
+            </SidebarGroupContent>
+          )}
+        </SidebarGroup>
+
+        <SidebarSeparator className={showGroup("entities") ? undefined : "hidden"} />
 
         {/* ── Creative Tabs ──────────────────────────────────── */}
         <SidebarGroup className={showGroup("creativeTabs") ? undefined : "hidden"}>

@@ -649,15 +649,53 @@ project `EffectSpec`'s bare id. Registers the `Potion` definition itself (so it 
 referenced, e.g. via commands); wiring an actual brewing-stand recipe to produce it is out of
 scope for now — part of the separate, later Crafting Recipes phase.
 
+### Entities
+
+`EntitySpec` — a custom mob. Unlike every other content type here, a brand-new mob genuinely needs
+Java: there's no code-gen step, so one class isn't compiled per user-authored mob. Instead one
+shared entity class and one shared renderer class back every spec sharing a `bodyTemplate`
+(`sheepfromheaven.screenspec.runtime.entity.Template<Template>{Entity,Renderer}`), each spec still
+gets its own real `EntityType` (attributes/hitbox/category attach per-`EntityType`) and its own
+renderer *instance* (the texture is a constructor parameter) — the same relationship vanilla itself
+uses for e.g. Husk/Zombie or WitherSkeleton/Skeleton (a shared renderer class reused across sibling
+`EntityType`s).
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | registry name |
+| `displayName` | string | |
+| `bodyTemplate` | `"zombie"` \| `"skeleton"` \| `"spider"` \| `"creeper"` | which vanilla model/animations/renderer this mob reuses — see below |
+| `texture` | string | pack texture key, must match the template's own vanilla skin UV layout |
+| `mobCategory` | `"monster"` \| `"creature"` \| `"ambient"` \| `"misc"` | vanilla `MobCategory` |
+| `maxHealth`, `movementSpeed`, `attackDamage` | number | layered on top of the template's own base `AttributeSupplier` |
+| `hitboxWidth`, `hitboxHeight` | number | `EntityType.Builder.sized(...)` |
+| `fireImmune` | boolean | |
+| `spawnEggPrimaryColor`, `spawnEggSecondaryColor` | hex | **webapp-only** — bake the spawn-egg icon PNG at export time; this MC version's `SpawnEggItem` has no runtime color-tint mechanism any more, so Java never sees these |
+| `creativeTab` | vanilla tab key, `"custom"`, or a project-defined tab id | applies to the spawn-egg item; defaults to `SPAWN_EGGS` |
+
+**Body templates (v1): zombie, skeleton, spider, creeper.** Chosen because none of the four depend
+on a variant registry (unlike Cow/Pig/Chicken/Wolf, which each carry a `Holder<XVariant>` their
+renderers/breeding code depend on) or profession data (unlike Villager) — subclassing those without
+also registering a default variant/profession entry risks a crash the first time the entity renders
+or breeds. More templates are a natural fast-follow once that's scoped.
+
+**AI goals are inherited wholesale from the vanilla template, on purpose** — none of the
+`Template*Entity` classes override `registerGoals()`. A custom AI-goal system is being developed
+separately (outside this generator); each `Template*Entity.java` carries a commented-out override
+stub showing exactly where it hooks in later, by hand.
+
+**Natural biome spawning isn't wired** (`RegisterSpawnPlacementsEvent` is unused) — v1 mobs are
+spawn-egg / `/summon` only.
+
 ### Scope
 
 No power/condition/trigger system (right-click abilities, cooldowns, skills) — attributes are the
 only "behavior," and they're vanilla's own declarative component, shared by items and effects. No
 custom block shapes yet (stairs/slabs/fences are a planned follow-up) — every block is a full
 `cube_all`. No lang-file generation — display names are literal `Component`s. No brewing recipes
-yet (see Potions above) — part of the later Crafting Recipes phase. No biomes or dimensions yet
-either — both are a much larger, separate datapack/worldgen system, planned as their own follow-up
-phase.
+yet (see Potions above) — part of the later Crafting Recipes phase. Custom entities are limited to
+4 body templates and spawn-egg/`/summon` spawning, with AI inherited from the template rather than
+generated (see Entities above).
 
 ### Internals
 
