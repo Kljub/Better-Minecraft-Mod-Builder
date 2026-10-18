@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { tabContentArea, computeDragBounds, computeResizeBounds, computeInitialSize, findAxisAlignment } from "@/lib/widgetBounds";
+import { tabContentArea, tabContentRect, computeDragBounds, computeResizeBounds, computeInitialSize, findAxisAlignment } from "@/lib/widgetBounds";
 import { makeWidget } from "./fixtures";
+import { computeSideTabLayout, sideTabSpot } from "@/components/widgets/tabs/tabLayout";
 
 // ── tabContentArea ─────────────────────────────────────────────────────────────
 
@@ -13,6 +14,39 @@ describe("tabContentArea", () => {
   it("defaults tab_height to 20 when prop absent", () => {
     const tabs = makeWidget({ id: "tabs", type: "tabs", w: 100, h: 80 });
     expect(tabContentArea(tabs)).toEqual({ w: 100, h: 60 });
+  });
+});
+
+describe("tabContentRect", () => {
+  it("puts the pane below the strip for top tabs", () => {
+    const tabs = makeWidget({ id: "tabs", type: "tabs", w: 200, h: 150, props: { tab_height: "30" } });
+    expect(tabContentRect(tabs)).toEqual({ x: 0, y: 30, w: 200, h: 120 });
+  });
+
+  it("puts the pane right of the strip for left tabs (tab_height = strip width)", () => {
+    const tabs = makeWidget({ id: "tabs", type: "tabs", w: 200, h: 150, props: { tab_height: "40", tab_position: "left" } });
+    expect(tabContentRect(tabs)).toEqual({ x: 40, y: 0, w: 160, h: 150 });
+    expect(tabContentArea(tabs)).toEqual({ w: 160, h: 150 });
+  });
+
+  it("puts the pane left of the strip for right tabs", () => {
+    const tabs = makeWidget({ id: "tabs", type: "tabs", w: 200, h: 150, props: { tab_height: "40", tab_position: "right" } });
+    expect(tabContentRect(tabs)).toEqual({ x: 0, y: 0, w: 160, h: 150 });
+  });
+});
+
+describe("computeSideTabLayout", () => {
+  it("stacks tabs evenly over the height with a 2px gap", () => {
+    const tabs = ["a", "b", "c"].map((id) => makeWidget({ id, type: "tab" }));
+    expect(computeSideTabLayout(tabs, 150).map(({ y, h }) => ({ y, h }))).toEqual([
+      { y: 0, h: 48 }, { y: 50, h: 48 }, { y: 100, h: 48 },
+    ]);
+  });
+
+  it("labels the first/last tab as top/bottom for sprite choice", () => {
+    expect(sideTabSpot(0, 48, 150)).toBe("top");
+    expect(sideTabSpot(50, 48, 150)).toBe("middle");
+    expect(sideTabSpot(100, 50, 150)).toBe("bottom");
   });
 });
 

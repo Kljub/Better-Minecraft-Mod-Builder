@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical } from "lucide-react";
+import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square } from "lucide-react";
 import Link from "next/link";
 import type { ScreenSpec, BindingsSchema } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import SettingsDialog from "@/components/SettingsDialog";
 import BindingsModal from "@/components/BindingsModal";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
 interface Props {
@@ -59,25 +58,21 @@ export default function Toolbar({
   const SNAP_STEPS = [1, 2, 4, 8];
   const snapIdx = SNAP_STEPS.indexOf(gridSize);
   return (
-    <div className="flex items-center gap-2 border-b bg-background px-3 py-2 flex-wrap shrink-0">
-      <SidebarTrigger className="h-8 w-8" />
-
-      <Separator orientation="vertical" className="h-5" />
-
+    <div className="flex items-center gap-1 border-b bg-sidebar px-2 py-1 flex-wrap shrink-0">
       <div className="flex items-center gap-1.5">
-        <label className="flex items-center gap-1.5 text-muted-foreground">
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
           W:
           <Input
-            className="h-8 w-16"
+            className="h-7 w-16 text-xs"
             type="number"
             value={screen.width}
             onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) onScreenChange({ width: v }); }}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
           H:
           <Input
-            className="h-8 w-16"
+            className="h-7 w-16 text-xs"
             type="number"
             value={screen.height}
             onChange={(e) => { const v = parseInt(e.target.value, 10); if (!isNaN(v) && v > 0) onScreenChange({ height: v }); }}
@@ -85,11 +80,11 @@ export default function Toolbar({
         </label>
       </div>
 
-      <Separator orientation="vertical" className="h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground"
           title="Snapping settings"
         >
           <Grid3x3 className="h-4 w-4" />
@@ -120,60 +115,61 @@ export default function Toolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Separator orientation="vertical" className="h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
-      <Button variant="outline" size="sm" className="h-8" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)">↩ Undo</Button>
-      <Button variant="outline" size="sm" className="h-8" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)">↪ Redo</Button>
+      <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)"><Undo2 className="h-4 w-4" /></Button>
+      <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)"><Redo2 className="h-4 w-4" /></Button>
 
-      <Separator orientation="vertical" className="h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
-      <Button variant="outline" size="sm" className="h-8 w-8 px-0" onClick={onCenterHorizontal} disabled={!hasSelection} title="Center selection horizontally">
+      <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onCenterHorizontal} disabled={!hasSelection} title="Center selection horizontally">
         <AlignCenterHorizontal className="h-4 w-4" />
       </Button>
-      <Button variant="outline" size="sm" className="h-8 w-8 px-0" onClick={onCenterVertical} disabled={!hasSelection} title="Center selection vertically">
+      <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onCenterVertical} disabled={!hasSelection} title="Center selection vertically">
         <AlignCenterVertical className="h-4 w-4" />
       </Button>
 
-      <Separator orientation="vertical" className="h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
       <div className="flex items-center">
-        <Button variant="outline" size="sm" className="h-8 w-8 rounded-r-none border-r-0" onClick={onZoomOut} disabled={scale <= 1} title="Zoom out (⌘-)">−</Button>
-        <Button variant="outline" size="sm" className="h-8 min-w-12 rounded-none" onClick={onZoomReset} title="Reset zoom (⌘0)">{Math.round(scale)}×</Button>
-        <Button variant="outline" size="sm" className="h-8 w-8 rounded-l-none border-l-0" onClick={onZoomIn} disabled={scale >= 8} title="Zoom in (⌘+)">+</Button>
+        <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onZoomOut} disabled={scale <= 1} title="Zoom out (⌘-)">−</Button>
+        <Button variant="ghost" size="sm" className="h-7 min-w-10 px-1 text-xs tabular-nums" onClick={onZoomReset} title="Reset zoom (⌘0)">{Math.round(scale)}×</Button>
+        <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onZoomIn} disabled={scale >= 8} title="Zoom in (⌘+)">+</Button>
       </div>
 
-      <Separator orientation="vertical" className="h-5" />
+      <Separator orientation="vertical" className="mx-1 h-4" />
 
       <Button
         size="sm"
-        className="h-8"
+        className="h-7 gap-1.5 px-3 font-semibold"
         variant={tryMode ? "destructive" : "default"}
         onClick={onToggleTryMode}
         title="Toggle try mode (T)"
       >
-        {tryMode ? "⏹ Stop" : "▶ Try"}
+        {tryMode ? <Square className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+        {tryMode ? "Stop" : "Try"}
       </Button>
 
       <div className="ml-auto flex items-center gap-1">
         {process.env.NODE_ENV === "development" && onSaveToTestMod && (
           <>
-            <Button variant="outline" size="sm" className="h-8" onClick={onSaveToTestMod} title="Save to neoforge-runtime test_container_screen.json">
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={onSaveToTestMod} title="Save to neoforge-runtime test_container_screen.json">
               Save to test mod
             </Button>
-            <Separator orientation="vertical" className="h-5" />
+            <Separator orientation="vertical" className="mx-1 h-4" />
           </>
         )}
-        <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={onCopyJava} title="Copy Java class definition">
+        <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onCopyJava} title="Copy Java class definition">
           <Clipboard className="h-4 w-4" />
         </Button>
-        <Separator orientation="vertical" className="h-5" />
-        <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={onImportProject} title="Import project (all screens)">
+        <Separator orientation="vertical" className="mx-1 h-4" />
+        <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onImportProject} title="Import project (all screens)">
           <FolderUp className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="sm" className="h-8 w-8 px-0" onClick={onExportProject} title="Export project (all screens)">
+        <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onExportProject} title="Export project (all screens)">
           <FolderDown className="h-4 w-4" />
         </Button>
-        <Separator orientation="vertical" className="h-5" />
+        <Separator orientation="vertical" className="mx-1 h-4" />
         <BindingsModal
           schema={bindingsSchema}
           onChangeSchema={onUpdateBindingsSchema}
@@ -181,8 +177,11 @@ export default function Toolbar({
           onChangeActions={onUpdateActions}
           modId={modId}
         />
-        <Link href="/docs" target="_blank" title="Documentation" className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+        <Link href="/docs" target="_blank" title="Documentation" className="inline-flex items-center justify-center h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
           <BookOpen className="h-4 w-4" />
+        </Link>
+        <Link href="/glb-to-bbmodel" target="_blank" title="GLB → bbmodel Konverter (für Blockbench)" className="inline-flex items-center justify-center h-7 w-7 rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+          <Box className="h-4 w-4" />
         </Link>
         <SettingsDialog
           screen={screen}

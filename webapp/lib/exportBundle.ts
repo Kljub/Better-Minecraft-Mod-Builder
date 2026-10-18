@@ -1,4 +1,8 @@
 import JSZip from "jszip";
+import type { ElementsByKind } from "./elements/types";
+import { DEFAULT_MC_VERSION, type McVersion } from "./mcVersion";
+import { writeElementFiles, writeElementArchiveCopies, hasElements, elementTextureKeys, elementBinaryKeys } from "./elements/export";
+import { loadStructureFiles } from "./structureStore";
 import { loadAllTextures } from "./textureStore";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, BlockFaceKey, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
@@ -17,7 +21,7 @@ function collectSpriteSrcs(widgets: WidgetSpec[]): Set<string> {
   return srcs;
 }
 
-function downloadBlob(blob: Blob, filename: string): void {
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -384,13 +388,20 @@ export interface ExportBundleInput {
   biomes?: BiomeSpec[];
   dimensions?: DimensionSpec[];
   armors?: ArmorSpec[];
+  /** generic MCreator-style elements (lib/elements), by kind */
+  elements?: ElementsByKind;
+  /** namespace to export under when none of the specs carry one (generic elements don't) */
+  modId?: string;
+  /** Minecraft version the generic elements are generated for */
+  mcVersion?: McVersion;
 }
 
 interface ResolvedInput {
   screens: ScreenSpec[]; items: ItemSpec[]; blocks: BlockSpec[]; creativeTabs: CreativeTabSpec[];
   customAttributes: CustomAttributeSpec[]; effects: EffectSpec[]; potions: PotionSpec[];
   achievements: AchievementSpec[]; recipes: RecipeSpec[]; trades: TradeSpec[]; lootEntries: LootEntrySpec[];
-  biomes: BiomeSpec[]; dimensions: DimensionSpec[]; armors: ArmorSpec[];
+  biomes: BiomeSpec[]; dimensions: DimensionSpec[]; armors: ArmorSpec[]; elements: ElementsByKind;
+  mcVersion: McVersion;
 }
 
 function resolveInput(input: ExportBundleInput): ResolvedInput {
@@ -400,13 +411,16 @@ function resolveInput(input: ExportBundleInput): ResolvedInput {
     effects: input.effects ?? [], potions: input.potions ?? [], achievements: input.achievements ?? [],
     recipes: input.recipes ?? [], trades: input.trades ?? [], lootEntries: input.lootEntries ?? [],
     biomes: input.biomes ?? [], dimensions: input.dimensions ?? [], armors: input.armors ?? [],
+    elements: input.elements ?? {},
+    mcVersion: input.mcVersion ?? DEFAULT_MC_VERSION,
   };
 }
 
 function hasAnyGeneratedContent(r: ResolvedInput): boolean {
   return r.items.length > 0 || r.blocks.length > 0 || r.customAttributes.length > 0 || r.effects.length > 0 ||
     r.potions.length > 0 || r.achievements.length > 0 || r.recipes.length > 0 || r.trades.length > 0 ||
-    r.lootEntries.length > 0 || r.biomes.length > 0 || r.dimensions.length > 0 || r.armors.length > 0;
+    r.lootEntries.length > 0 || r.biomes.length > 0 || r.dimensions.length > 0 || r.armors.length > 0 ||
+    hasElements(r.elements);
 }
 
 function collectAllSrcs(r: ResolvedInput): Set<string> {
@@ -429,7 +443,7 @@ function collectAllSrcs(r: ResolvedInput): Set<string> {
   return srcs;
 }
 
-function resolveModId(r: ResolvedInput): string {
+function resolveModId(r: ResolvedInput, fallback?: string): string {
   return (
     r.screens.find((s) => s.modId?.trim())?.modId?.trim() ||
     r.items.find((i) => i.modId?.trim())?.modId?.trim() ||
@@ -443,6 +457,7 @@ function resolveModId(r: ResolvedInput): string {
     r.biomes.find((b) => b.modId?.trim())?.modId?.trim() ||
     r.dimensions.find((d) => d.modId?.trim())?.modId?.trim() ||
     r.armors.find((a) => a.modId?.trim())?.modId?.trim() ||
+    fallback?.trim() ||
     "minecraft"
   );
 }
@@ -582,6 +597,10 @@ function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: Resol
   }
   if (r.armors.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/armors.json`, JSON.stringify(r.armors, null, 2));
 
+  writeElementFiles(zip, prefix, r.elements, {
+    modId, mcVersion: r.mcVersion, texture: (k) => allTextures[`pack:${k}`], file: (k) => allTextures[`structure:${k}`],
+  });
+
   return bundled;
 }
 
@@ -600,6 +619,14 @@ function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: Resol
  * per-category "Export"/"Export All" button — see downloadFullProjectExport for the differently
  * laid-out "Export Project" button.
  */
+/** Element binaries (structure .nbt files) keyed "structure:<key>", next to the texture blobs. */
+async function loadElementBinaries(r: ResolvedInput): Promise<Record<string, Blob>> {
+  const keys = elementBinaryKeys(r.elements);
+  if (keys.length === 0) return {};
+  const files = await loadStructureFiles(keys);
+  return Object.fromEntries(Object.entries(files).map(([k, b]) => [`structure:${k}`, b]));
+}
+
 export async function downloadExport(jsonFilename: string, json: string, input: ExportBundleInput): Promise<void> {
   const r = resolveInput(input);
   const srcs = collectAllSrcs(r);
@@ -610,8 +637,9 @@ export async function downloadExport(jsonFilename: string, json: string, input: 
     return;
   }
 
-  const allTextures = srcs.size > 0 ? await loadAllTextures() : {};
-  const modId = resolveModId(r);
+  const allTextures: Record<string, Blob> = srcs.size > 0 || elementTextureKeys(r.elements).length > 0 ? await loadAllTextures() : {};
+  Object.assign(allTextures, await loadElementBinaries(r));
+  const modId = resolveModId(r, input.modId);
 
   const zip = new JSZip();
   zip.file(jsonFilename, json);
@@ -711,6 +739,9 @@ function writeArchiveCopies(zip: JSZip, prefix: string, modId: string, r: Resolv
     zip.file(`${prefix}LootTables/${l.id}/loot_table.json`, lootTableJson(l));
     zip.file(`${prefix}LootTables/${l.id}/loot_modifier.json`, lootModifierJson(modId, l));
   }
+  writeElementArchiveCopies(zip, prefix, r.elements, {
+    modId, mcVersion: r.mcVersion, texture: (k) => allTextures[`pack:${k}`], file: (k) => allTextures[`structure:${k}`],
+  });
   for (const armor of r.armors) {
     zip.file(`${prefix}Armor/${armor.id}/spec.json`, JSON.stringify(armor, null, 2));
     if (armor.equipmentTexture) zip.file(`${prefix}Armor/${armor.id}/equipment.json`, equipmentAssetJson(modId, armor.id));
@@ -729,7 +760,8 @@ function writeArchiveCopies(zip: JSZip, prefix: string, modId: string, r: Resolv
 export async function downloadFullProjectExport(projectName: string, projectJson: string, input: ExportBundleInput): Promise<void> {
   const r = resolveInput(input);
   const allTextures = await loadAllTextures();
-  const modId = resolveModId(r);
+  Object.assign(allTextures, await loadElementBinaries(r));
+  const modId = resolveModId(r, input.modId);
   const root = `${projectName}/`;
 
   const zip = new JSZip();

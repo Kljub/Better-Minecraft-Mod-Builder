@@ -106,3 +106,23 @@ export function tabEdgePosition(tabX: number, tabW: number, containerWidth: numb
   if (tabX + tabW >= containerWidth) return "right";
   return "middle";
 }
+
+/**
+ * Side (left/right) tabs: stacked top-to-bottom, evenly sharing the container
+ * height with `gap` between them. Unlike top tabs they have no per-tab
+ * drag/resize — their x/w/y/h fields are ignored. Mirrors the runtime's
+ * SpecWidgetBuilder.forEachTab side branch exactly.
+ */
+export function computeSideTabLayout(tabChildren: WidgetSpec[], containerHeight: number, gap = TAB_GAP): { tab: WidgetSpec; y: number; h: number }[] {
+  const n = tabChildren.length;
+  if (n === 0) return [];
+  const h = Math.max(16, Math.floor((containerHeight - gap * (n - 1)) / n));
+  return tabChildren.map((tab, i) => ({ tab, y: i * (h + gap), h }));
+}
+
+/** Where a side tab sits along its strip — picks vanilla's tab_left_/tab_right_{top,middle,bottom} sprite, whose corner art meets the content pane's top/bottom corner. */
+export function sideTabSpot(tabY: number, tabH: number, containerHeight: number): "top" | "middle" | "bottom" {
+  if (tabY <= 0) return "top";
+  if (tabY + tabH >= containerHeight) return "bottom";
+  return "middle";
+}

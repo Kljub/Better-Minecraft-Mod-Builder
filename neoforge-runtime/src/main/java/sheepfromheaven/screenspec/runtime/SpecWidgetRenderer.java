@@ -327,13 +327,62 @@ final class SpecWidgetRenderer {
 
     /** Draws a {@code tabs} selector button. {@code nested} selects the compact {@code widget/tab}
      *  sprite (3px uniform border); {@code !nested} uses vanilla's creative-inventory sprite (4px,
-     *  position-dependent). */
-    void renderTab(DrawContext ctx, boolean active, TabButtonWidget.Position position, boolean nested, int x, int y, int w, int h) {
-        if (nested) {
+     *  position-dependent). Side tabs use vanilla's advancement side-tab sprites. */
+    void renderTab(DrawContext ctx, boolean active, TabButtonWidget.Position position, TabButtonWidget.Side side, boolean nested, int x, int y, int w, int h) {
+        if (side != TabButtonWidget.Side.TOP) {
+            renderSideTab(ctx, active, position, side, x, y, w, h);
+        } else if (nested) {
             renderNestedTab(ctx, active, x, y, w, h);
         } else {
             renderTopTab(ctx, active, position, x, y, w, h);
         }
+    }
+
+    // Vanilla's advancement-screen side tabs (32×28, open toward the body): tab_{left,right}_
+    // {top,middle,bottom}[_selected] — the same sprites the webapp canvas draws for side tabs.
+    // Hand nine-sliced at 4px like the top tabs. Unselected sprites carry a 4px transparent margin
+    // on their outer edge (they sit narrower), which is cropped off so the art starts at the
+    // button's edge, like TAB_UNSELECTED_TOP_V does for top tabs.
+    private static final int SIDE_TAB_TEX_W = 32;
+    private static final int SIDE_TAB_TEX_H = 28;
+    private static final int SIDE_TAB_UNSELECTED_MARGIN = 4;
+
+    private static Identifier sideTabTexture(TabButtonWidget.Side side, TabButtonWidget.Position position, boolean active) {
+        String spot = switch (position) {
+            case LEFT  -> "top";
+            case RIGHT -> "bottom";
+            default    -> "middle";
+        };
+        String edge = side == TabButtonWidget.Side.LEFT ? "left" : "right";
+        return Identifier.withDefaultNamespace("textures/gui/sprites/advancements/tab_" + edge + "_" + spot + (active ? "_selected" : "") + ".png");
+    }
+
+    /**
+     * Draws a left/right tab. {@code position} LEFT/MIDDLE/RIGHT means top/middle/bottom of the
+     * strip here (see {@code SpecWidgetBuilder.forEachSideTab}).
+     */
+    private void renderSideTab(DrawContext ctx, boolean active, TabButtonWidget.Position position, TabButtonWidget.Side side, int x, int y, int w, int h) {
+        Identifier tex = sideTabTexture(side, position, active);
+        int u0 = (!active && side == TabButtonWidget.Side.LEFT) ? SIDE_TAB_UNSELECTED_MARGIN : 0;
+        int srcW = active ? SIDE_TAB_TEX_W : SIDE_TAB_TEX_W - SIDE_TAB_UNSELECTED_MARGIN;
+        int b = TAB_BORDER;
+        int centerU = u0 + srcW / 2;
+        int centerV = SIDE_TAB_TEX_H / 2;
+        int rightU  = u0 + srcW - b;
+        int bottomV = SIDE_TAB_TEX_H - b;
+        int fillW   = Math.max(0, w - b * 2);
+        int fillH   = Math.max(0, h - b * 2);
+        int tw = SIDE_TAB_TEX_W, th = SIDE_TAB_TEX_H;
+
+        ninePatch(ctx, tex, x,         y,         u0,      0,       b, b, b,     b,     tw, th);
+        ninePatch(ctx, tex, x + b,     y,         centerU, 0,       1, b, fillW, b,     tw, th);
+        ninePatch(ctx, tex, x + w - b, y,         rightU,  0,       b, b, b,     b,     tw, th);
+        ninePatch(ctx, tex, x,         y + b,     u0,      centerV, b, 1, b,     fillH, tw, th);
+        ninePatch(ctx, tex, x + b,     y + b,     centerU, centerV, 1, 1, fillW, fillH, tw, th);
+        ninePatch(ctx, tex, x + w - b, y + b,     rightU,  centerV, b, 1, b,     fillH, tw, th);
+        ninePatch(ctx, tex, x,         y + h - b, u0,      bottomV, b, b, b,     b,     tw, th);
+        ninePatch(ctx, tex, x + b,     y + h - b, centerU, bottomV, 1, b, fillW, b,     tw, th);
+        ninePatch(ctx, tex, x + w - b, y + h - b, rightU,  bottomV, b, b, b,     b,     tw, th);
     }
 
     private void renderTopTab(DrawContext ctx, boolean active, TabButtonWidget.Position position, int x, int y, int w, int h) {

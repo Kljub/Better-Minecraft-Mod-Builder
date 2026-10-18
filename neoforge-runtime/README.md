@@ -22,8 +22,9 @@ into a real, working `Screen` — no codegen, no hand-laid-out widgets.
 7. [Extending and customising](#extending-and-customising)
 8. [Tabs (creative-menu-style)](#tabs-creative-menu-style)
 9. [Items and Blocks](#items-and-blocks)
-10. [Known limitations](#known-limitations)
-11. [Building locally](#building-locally)
+10. [Mod elements (commands, fluids, …)](#mod-elements-commands-fluids-)
+11. [Known limitations](#known-limitations)
+12. [Building locally](#building-locally)
 
 ---
 
@@ -524,7 +525,12 @@ selector row.
 ```
 
 The `tab_height` prop (default `20`) sets the selector row's thickness. A
-`tab`'s `text`/`icon` fields are its selector label/icon. No new API is needed
+`tab_position` prop of `"left"` or `"right"` (default `"top"`) moves the
+selectors into a vertical strip along that edge instead — `tab_height` is then
+the strip's width, the tabs share the full height evenly (their `x`/`w`/`y`/`h`
+are ignored), content fills the space beside the strip, and they're drawn with
+vanilla's advancement side-tab sprites (`advancements/tab_left_*` /
+`tab_right_*`). A `tab`'s `text`/`icon` fields are its selector label/icon. No new API is needed
 for the common case — `onAction`/`on(...)` fire normally for widgets nested
 inside any tab. Override `onTabSwitch` to react to a tab change:
 
@@ -671,6 +677,60 @@ phase.
 - None of `ItemSpecs`/`BlockSpecs`/`CustomAttributeSpecs`/`ModContent` are meant to be called
   directly by a consuming mod — `ScreenSpecMod` calls them automatically for every mod on the
   classpath.
+
+---
+
+## Custom mobs (Entity Models)
+
+The webapp's **Entity Models** tab (Design / Animation / Settings) exports one entry per mob to
+`assets/<modid>/screenspec/elements/entities.json`; this runtime turns each into a real
+`EntityType` — no Java to write. Geometry and animations arrive already converted to Java model
+space (the same data the webapp's "Java model class" / "Java animations class" downloads print),
+so the in-game model matches the editor.
+
+Per mob you get:
+
+- an `EntityType` (`SpecMonster` for the `monster` category — despawns in peaceful, spawns in the
+  dark — otherwise `SpecMob`) with hitbox, fire immunity and XP from the Settings tab;
+- attributes: max health, movement speed, attack damage, armor, knockback resistance, follow range;
+- AI by `behavior`: `passive` (wanders, panics when hit), `neutral` (fights back), `hostile_melee`
+  (hunts players), `stationary`;
+- melee attacks dealing the chosen **damage type** (e.g. one from the Damage Types tab; unknown ids
+  fall back to `minecraft:mob_attack`);
+- a spawn egg in the Spawn Eggs tab, and spawn placement rules when "Spawns naturally" is on (the
+  webapp also exports the matching `neoforge:add_spawns` biome modifier);
+- client: the model layer built from the exported parts, keyframe animations baked with vanilla's
+  `AnimationDefinition` — idle (while standing), walk (scaled by walk speed) and attack (on each hit).
+
+Assets the webapp exports alongside: `textures/entity/<id>.png`, the spawn egg model/item/texture,
+and `entity.<modid>.<id>` / `item.<modid>.<id>_spawn_egg` names in `lang/en_us.json`. The same
+tab can also export a Bedrock add-on (`.mcaddon`) and Blockbench / GeckoLib files.
+
+---
+
+## Mod elements (commands, fluids, …)
+
+The web tool's element types that need real Java registration export one manifest each — a JSON
+array at `assets/<modid>/screenspec/elements/<name>.json` — next to the usual data/asset files.
+`ScreenSpecMod` registers them through `ModElements` for every loaded mod, same as items/blocks:
+**no Java code required.** Field names mirror the web tool's `webapp/lib/elements/modKinds.ts`.
+
+| Manifest | Registers | Notes |
+|---|---|---|
+| `commands` | a Brigadier command `/<id>` | runs vanilla command lines as the caller; optional `player`/`integer`/`text` argument substituted as `$(arg)`; `elevate` runs them at `permissionLevel` — refused together with a `text` argument (command injection) |
+| `game_rules` | a `minecraft:game_rule` entry `<modid>:<id>` | boolean or bounded integer; read from mod code with `GameRuleSpecs.getBoolean/getInteger(server, modId, id)` |
+| `fluids` | `FluidType`, source + `flowing_<id>` fluid, `LiquidBlock`, optional `<id>_bucket` | renders as vanilla water/lava tinted with `color` (`RegisterFluidModelsEvent`) |
+| `villager_professions` | `VillagerProfession` + its `PoiType` | job-site block must not already be a vanilla POI; trades come from the exported `trade_set/<id>/level_1..5` data |
+| `plants` | flower (`FlowerBlock`, optional `potted_<id>`) or tall flower (`TallFlowerBlock`) + items | worldgen, loot tables and models are exported data |
+| `particles` | a `SimpleParticleType` + configurable client particle | lifetime, gravity, scale, friction, tint, emissive, animated frames from `particles/<id>.json` |
+| `key_bindings` | a `KeyMapping` (client only) | sends a command as the player, or opens one of the mod's exported plain screens |
+| `boats` | `<id>_boat` / `<id>_chest_boat` entity + item | vanilla boat model and renderer, texture at `textures/entity/boat/<id>.png` |
+| `projectiles` | a thrown projectile entity + the item that throws it | damage, fire, effect, explosion, gravity, cooldown; drawn as its item |
+| `armor_trims` | the `<id>_armor_trim_smithing_template` item | the trim pattern, recipes and paletted textures are exported data |
+
+Structures need no Java at all: the export writes `data/<modid>/structure/<id>.nbt` (usable with
+`/place template <modid>:<id>`) and, if enabled, a single-piece jigsaw structure, template pool
+and structure set for natural generation.
 
 ---
 

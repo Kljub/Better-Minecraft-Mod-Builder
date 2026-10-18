@@ -274,6 +274,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
             attributeOptions={attributeOptions}
             attributeLabels={attributeLabels}
             onChange={setAttributes}
+            aiContext={{ target: "item", name: item.displayName, category: item.category, rarity: item.rarity, customAttributes }}
           />
         </div>
       )}

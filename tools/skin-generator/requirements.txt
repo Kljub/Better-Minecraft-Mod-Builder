@@ -1,0 +1,9 @@
+# torch with CUDA comes from the PyTorch index — see README.md
+diffusers>=0.39
+transformers>=4.46
+accelerate>=1.0
+safetensors>=0.4
+pillow>=10
+numpy>=1.26
+gradio>=5.50,<6
+peft>=0.17

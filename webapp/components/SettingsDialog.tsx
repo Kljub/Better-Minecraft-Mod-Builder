@@ -1,8 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useTheme } from "next-themes";
-import { Settings, Sun, Moon, Monitor, Loader2 } from "lucide-react";
+import { Settings, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +13,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { ScreenSpec } from "@/lib/types";
+import AiSettingsTab from "@/components/AiSettingsTab";
+import { setNextDevToolsVisible, useNextDevToolsVisible } from "@/lib/devToolsSetting";
+
+export type SettingsTab = "general" | "ai";
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "ai", label: "AI" },
+];
 
 interface Props {
   screen: ScreenSpec;
@@ -21,6 +28,10 @@ interface Props {
   onResetTextures: () => Promise<void>;
   onViewTextures: () => void;
   onExtractPack: (file: File) => Promise<{ extracted: string[]; missing: string[] }>;
+  /** controlled mode (e.g. opened from the sidebar rail's gear) — hides the built-in trigger button */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialTab?: SettingsTab;
 }
 
 export default function SettingsDialog({
@@ -29,13 +40,20 @@ export default function SettingsDialog({
   onResetTextures,
   onViewTextures,
   onExtractPack,
+  open: controlledOpen,
+  onOpenChange,
+  initialTab = "general",
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const controlled = controlledOpen !== undefined;
+  const open = controlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (v: boolean) => { if (!controlled) setUncontrolledOpen(v); onOpenChange?.(v); };
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const showDevTools = useNextDevToolsVisible();
   const [resetLoading, setResetLoading] = useState(false);
   const [packLoading, setPackLoading] = useState(false);
   const [packResult, setPackResult] = useState<{ extracted: string[]; missing: string[] } | null>(null);
   const packInputRef = useRef<HTMLInputElement>(null);
-  const { theme, setTheme } = useTheme();
 
   const handleReset = async () => {
     setResetLoading(true);
@@ -60,15 +78,17 @@ export default function SettingsDialog({
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 w-8 px-0"
-        onClick={() => setOpen(true)}
-        title="Settings"
-      >
-        <Settings className="h-5 w-5" />
-      </Button>
+      {!controlled && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 px-0"
+          onClick={() => setOpen(true)}
+          title="Settings"
+        >
+          <Settings className="h-5 w-5" />
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -76,6 +96,21 @@ export default function SettingsDialog({
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>
 
+          <div className="flex gap-1 border-b border-input">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`px-2.5 py-1 text-sm -mb-px border-b-2 ${tab === t.id ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab === "ai" && <AiSettingsTab />}
+
+          {tab === "general" && (
           <div className="flex flex-col gap-5 py-2">
             {/* Project */}
             <section className="flex flex-col gap-3">
@@ -96,34 +131,27 @@ export default function SettingsDialog({
 
             <Separator />
 
-            {/* Appearance */}
-            <section className="flex flex-col gap-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Appearance</p>
-              <div className="flex items-center justify-between">
-                <Label>Theme</Label>
-                <div className="flex items-center rounded-md border overflow-hidden">
-                  {(["light", "system", "dark"] as const).map((t) => {
-                    const Icon = t === "light" ? Sun : t === "dark" ? Moon : Monitor;
-                    return (
-                      <button
-                        key={t}
-                        onClick={() => setTheme(t)}
-                        title={t.charAt(0).toUpperCase() + t.slice(1)}
-                        className={`flex h-8 w-9 items-center justify-center transition-colors ${
-                          theme === t
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
+            {process.env.NODE_ENV === "development" && (
+              <>
+                {/* Developer */}
+                <section className="flex flex-col gap-3">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Developer</p>
+                  <label className="flex items-center justify-between gap-2 cursor-pointer">
+                    <div>
+                      <p className="text-sm">Show Next.js dev tools</p>
+                      <p className="text-xs text-muted-foreground">The floating &quot;N&quot; badge in the bottom corner (dev server only)</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={showDevTools}
+                      onChange={(e) => setNextDevToolsVisible(e.target.checked)}
+                    />
+                  </label>
+                </section>
 
-            <Separator />
+                <Separator />
+              </>
+            )}
 
             {/* Textures */}
             <section className="flex flex-col gap-3">
@@ -186,6 +214,7 @@ export default function SettingsDialog({
               </div>
             </section>
           </div>
+          )}
         </DialogContent>
       </Dialog>
     </>

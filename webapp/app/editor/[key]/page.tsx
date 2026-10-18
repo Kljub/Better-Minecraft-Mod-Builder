@@ -28,7 +28,24 @@ import BiomePreview from "@/components/BiomePreview";
 import DimensionPropertyPanel from "@/components/DimensionPropertyPanel";
 import DimensionPreview from "@/components/DimensionPreview";
 import TextureEditorPanel from "@/components/TextureEditorPanel";
-import AppSidebar, { type ActiveDocType } from "@/components/Sidebar";
+import SettingsDialog from "@/components/SettingsDialog";
+import AppSidebar, { type ActiveDocType, type SectionKey, SECTION_ICONS, sectionOfDoc, sectionIcon, sectionLabel } from "@/components/Sidebar";
+import CategoryView, { type CategoryViewProps } from "@/components/CategoryView";
+import { LayersSection, TemplatesSection, AttributePresetsSection } from "@/components/EditorSidePanels";
+import WorkspaceOverview, { type WorkspaceSection } from "@/components/WorkspaceOverview";
+import ResourcesPanel from "@/components/ResourcesPanel";
+import ItemSkinGeneratorPanel from "@/components/ItemSkinGeneratorPanel";
+import ElementEditor, { ElementFilesPreview } from "@/components/ElementEditor";
+import ModelEditor from "@/components/model3d/ModelEditor";
+import { defaultEntitySettings } from "@/lib/elements/entitySettings";
+import { setBridgeEnabled, useBridgeEnabled, useMcpBridge } from "@/lib/ai/mcpBridge";
+import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
+import EntityModelGeneratorPanel from "@/components/EntityModelGeneratorPanel";
+import { runTool, type EditorApi } from "@/lib/ai/editorTools";
+import type { EntityModel } from "@/lib/model3d/types";
+import { ELEMENT_KINDS, getElementKind, normalizeElements, normalizeElement, elementLabel } from "@/lib/elements/registry";
+import type { ElementsByKind, ElementSpec } from "@/lib/elements/types";
+import { MC_VERSIONS, MC_VERSION_LABELS, normalizeMcVersion, type McVersion } from "@/lib/mcVersion";
 import Toolbar from "@/components/Toolbar";
 import { Button } from "@/components/ui/button";
 import { useTextures } from "@/lib/TextureContext";
@@ -60,7 +77,11 @@ import {
   loadBlockTemplates, saveBlockTemplates, type BlockTemplate,
 } from "@/lib/templates";
 import { loadAttributePresets, saveAttributePresets, type AttributePreset } from "@/lib/attributePresets";
-import { downloadExport, downloadFullProjectExport } from "@/lib/exportBundle";
+import { downloadBlob, downloadExport, downloadFullProjectExport } from "@/lib/exportBundle";
+import { buildBedrockAddon } from "@/lib/bedrockAddon";
+import { readSpecBundle, mergeSpecsById, type ImportCategory } from "@/lib/importBundle";
+import { saveTexture, loadAllTextures } from "@/lib/textureStore";
+import { toast } from "sonner";
 import { genId, copyToClipboard } from "@/lib/utils";
 
 function newId(type: string, existing: WidgetSpec[]): string {
@@ -109,6 +130,10 @@ interface ProjectFile {
   lootEntries: LootEntrySpec[];
   biomes: BiomeSpec[];
   dimensions: DimensionSpec[];
+  /** generic MCreator-style elements (lib/elements), by kind */
+  elements?: ElementsByKind;
+  /** Minecraft version the project generates files for */
+  mcVersion?: McVersion;
   appVersion: string;
 }
 
@@ -131,6 +156,12 @@ interface HistoryEntry {
   lootEntries: LootEntrySpec[];
   biomes: BiomeSpec[];
   dimensions: DimensionSpec[];
+  /** generic MCreator-style elements (lib/elements), by kind */
+  elements: ElementsByKind;
+  /** which generic element is open when activeDocType is "element" */
+  activeElement: { kind: string; idx: number } | null;
+  /** Minecraft version the project generates files for (project setting, undoable like any edit) */
+  mcVersion: McVersion;
   activeIdx: number;
   activeDocType: ActiveDocType;
   activeItemIdx: number;
@@ -170,6 +201,7 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
       history: (hist as ScreenSpec[]).map(s => ({
         screens: [s], items: [], blocks: [], armors: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
         achievements: [], recipes: [], trades: [], lootEntries: [], biomes: [], dimensions: [],
+        elements: {}, activeElement: null, mcVersion: normalizeMcVersion(undefined),
         activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeAttributeIdx: 0,
         activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
         activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0,
@@ -193,6 +225,9 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
     lootEntries: (Array.isArray(e.lootEntries) ? e.lootEntries : []) as LootEntrySpec[],
     biomes: (Array.isArray(e.biomes) ? e.biomes : []) as BiomeSpec[],
     dimensions: (Array.isArray(e.dimensions) ? e.dimensions : []) as DimensionSpec[],
+    elements: normalizeElements(e.elements),
+    activeElement: (e.activeElement as HistoryEntry["activeElement"]) ?? null,
+    mcVersion: normalizeMcVersion(e.mcVersion),
     activeIdx: (e.activeIdx as number) ?? 0,
     activeDocType: ((e.activeDocType as ActiveDocType) ?? "screen"),
     activeItemIdx: (e.activeItemIdx as number) ?? 0,
@@ -289,6 +324,7 @@ const EMPTY_SESSION: SavedSession = {
   history: [{
     screens: [PLACEHOLDER_SCREEN], items: [], blocks: [], armors: [], creativeTabs: [], customAttributes: [], effects: [], potions: [],
     achievements: [], recipes: [], trades: [], lootEntries: [], biomes: [], dimensions: [],
+    elements: {}, activeElement: null, mcVersion: normalizeMcVersion(undefined),
     activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeArmorIdx: 0, activeAttributeIdx: 0,
     activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
     activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0,
@@ -303,8 +339,9 @@ export default function EditorPage() {
   const router = useRouter();
   const projectKey = params.key;
 
-  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture } = useTextures();
+  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture, reload: reloadTextures } = useTextures();
   const [showTextureDebug, setShowTextureDebug] = useState(false);
+  const [railSettingsOpen, setRailSettingsOpen] = useState(false);
   const [projectLoaded, setProjectLoaded] = useState(false);
   const [templates, setTemplates] = useState<ScreenTemplate[]>([]);
   const [itemTemplates, setItemTemplates] = useState<ItemTemplate[]>([]);
@@ -351,7 +388,24 @@ export default function EditorPage() {
   const biomes = entry.biomes;
   const dimensions = entry.dimensions;
   const armors = entry.armors;
+  const elements = entry.elements;
+  const mcVersion = entry.mcVersion;
+  const activeElementRef = entry.activeElement;
+  const activeElementDef = activeElementRef ? getElementKind(activeElementRef.kind) : undefined;
+  const activeElement = activeElementRef ? (elements[activeElementRef.kind] ?? [])[activeElementRef.idx] ?? null : null;
   const activeDocType = entry.activeDocType;
+  // Main-area browsers opened from the icon rail: the workspace overview ("All categories"), a
+  // category's element grid, or the Resources image library. null = the open element's editor;
+  // opening/adding an element from a browser closes it.
+  const [mainView, setMainView] = useState<{ kind: "workspace" } | { kind: "section"; key: SectionKey } | null>(null);
+  const activeMainView = mainView === null ? null
+    : mainView.kind === "workspace" ? "workspace"
+    : mainView.key === "resources" ? "resources"
+    : mainView.key === "skinGenerator" ? "skinGenerator"
+    : mainView.key === "modelGenerator" ? "modelGenerator" : "category";
+  const showWorkspace = activeMainView === "workspace";
+  const railActive = mainView === null ? sectionOfDoc(activeDocType, entry.activeElement?.kind)
+    : mainView.kind === "workspace" ? "all" : mainView.key;
   const activeItemIdx = entry.activeItemIdx;
   const activeBlockIdx = entry.activeBlockIdx;
   const activeAttributeIdx = entry.activeAttributeIdx;
@@ -392,6 +446,8 @@ export default function EditorPage() {
   const clipboardRef = useRef<WidgetSpec | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const importProjectRef = useRef<HTMLInputElement>(null);
+  const importCategoryInputRef = useRef<HTMLInputElement>(null);
+  const importCategoryRef = useRef<ImportCategory | null>(null);
 
   // Redirect to setup if textures aren't ready after init.
   useEffect(() => {
@@ -1764,6 +1820,8 @@ export default function EditorPage() {
         biomes,
         dimensions,
         armors,
+        elements,
+        mcVersion,
         appVersion: APP_VERSION,
       };
       const json = JSON.stringify(project, null, 2);
@@ -1771,12 +1829,13 @@ export default function EditorPage() {
       const friendlyName = screens.find((s) => s.modId?.trim())?.modId?.trim() || projectKey;
       await downloadFullProjectExport(friendlyName, json, {
         screens: exportedScreens, items, blocks, creativeTabs, customAttributes, effects, potions,
-        achievements, recipes, trades, lootEntries, biomes, dimensions, armors,
+        achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements,
+        modId: friendlyName, mcVersion,
       });
     } catch (e) {
       alert(`Could not export project: ${e instanceof Error ? e.message : e}`);
     }
-  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors]);
+  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements, mcVersion]);
 
   const handleImportProjectClick = () => importProjectRef.current?.click();
   const handleImportProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1813,6 +1872,7 @@ export default function EditorPage() {
           effects: importedEffects, potions: importedPotions,
           achievements: importedAchievements, recipes: importedRecipes, trades: importedTrades, lootEntries: importedLootEntries,
           biomes: importedBiomes, dimensions: importedDimensions, armors: importedArmors,
+          elements: normalizeElements(migrated.elements), activeElement: null, mcVersion: normalizeMcVersion(migrated.mcVersion),
           activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeAttributeIdx: 0,
           activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
           activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0, activeArmorIdx: 0,
@@ -1824,6 +1884,312 @@ export default function EditorPage() {
     };
     reader.readAsText(file);
     e.target.value = "";
+  };
+
+  // Every element of the project, for the WorkspaceOverview tile grid.
+  const workspaceSections = (): WorkspaceSection[] => {
+    const tex = (key: string | undefined) => (key ? packTextures[key] : undefined);
+    const named = <T extends { id: string; displayName?: string }>(
+      key: SectionKey, list: T[], activeType: ActiveDocType, activeAt: number,
+      open: ((idx: number) => void) | undefined, thumb?: (spec: T) => string | undefined,
+    ): WorkspaceSection => ({
+      key, label: sectionLabel(key), icon: sectionIcon(key),
+      entries: list.map((spec, i) => ({
+        key: `${key}:${spec.id}:${i}`,
+        label: spec.displayName || spec.id,
+        sublabel: spec.displayName && spec.displayName !== spec.id ? spec.id : undefined,
+        thumb: thumb?.(spec),
+        active: activeDocType === activeType && activeAt === i,
+        onOpen: open ? () => { setMainView(null); open(i); } : undefined,
+      })),
+    });
+    const customTextureKeys = Object.keys(packTextures).filter((k) => k.startsWith("custom/")).sort();
+    return [
+      named("screens", screens, "screen", activeIdx, switchScreen),
+      named("items", items, "item", activeItemIdx, switchItem, (it) => tex(it.texture)),
+      named("blocks", blocks, "block", activeBlockIdx, switchBlock, (b) => tex(b.texture)),
+      named("armors", armors, "armor", activeArmorIdx, switchArmor, (a) => tex(a.iconChestplate)),
+      named("creativeTabs", creativeTabs, "screen", -1, undefined),
+      named("customAttributes", customAttributes, "attribute", activeAttributeIdx, switchCustomAttribute),
+      named("effects", effects, "effect", activeEffectIdx, switchEffect, (e) => tex(e.icon)),
+      named("potions", potions, "potion", activePotionIdx, switchPotion),
+      {
+        key: "resources", label: sectionLabel("resources"), icon: SECTION_ICONS.resources,
+        entries: customTextureKeys.map((k) => ({
+          key: `resources:${k}`,
+          label: k.replace(/^custom\//, "").replace(/\.[^./]+$/, ""),
+          thumb: packTextures[k],
+          onOpen: () => { setMainView(null); openExistingTexture(k); },
+        })),
+      },
+      named("achievements", achievements, "achievement", activeAchievementIdx, switchAchievement),
+      named("recipes", recipes, "recipe", activeRecipeIdx, switchRecipe),
+      named("trades", trades, "trade", activeTradeIdx, switchTrade),
+      named("lootEntries", lootEntries, "loot", activeLootEntryIdx, switchLootEntry),
+      named("biomes", biomes, "biome", activeBiomeIdx, switchBiome),
+      named("dimensions", dimensions, "dimension", activeDimensionIdx, switchDimension),
+      ...ELEMENT_KINDS.map((def): WorkspaceSection => ({
+        key: `el:${def.kind}`, label: def.plural, icon: def.icon,
+        entries: (elements[def.kind] ?? []).map((spec, i) => {
+          const thumb = def.thumb?.(spec);
+          return {
+            key: `el:${def.kind}:${spec.id}:${i}`,
+            label: elementLabel(def, spec),
+            sublabel: elementLabel(def, spec) !== spec.id ? spec.id : undefined,
+            thumb: thumb ? packTextures[thumb] : undefined,
+            active: activeDocType === "element" && activeElementRef?.kind === def.kind && activeElementRef.idx === i,
+            onOpen: () => { setMainView(null); switchElement(def.kind, i); },
+          };
+        }),
+      })),
+    ].map((section) => {
+      // Right-click actions (rename/duplicate/export/delete) are the category browser's own, so
+      // both views behave identically — same list order, so entries line up by index.
+      if (section.key === "resources" || section.key === "skinGenerator" || section.key === "modelGenerator") return section;
+      // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
+      const actions = categoryView(section.key as Exclude<SectionKey, "resources" | "skinGenerator" | "modelGenerator">).entries;
+      return {
+        ...section,
+        entries: section.entries.map((e, i) => ({
+          ...e,
+          onRename: actions[i]?.onRename,
+          onDuplicate: actions[i]?.onDuplicate,
+          onExport: actions[i]?.onExport,
+          onDelete: actions[i]?.onDelete,
+        })),
+      };
+    });
+  };
+
+  // One category's element browser (icon rail entry) — replaces the old text sidebar's lists.
+  const categoryView = (key: Exclude<SectionKey, "resources" | "skinGenerator" | "modelGenerator">): CategoryViewProps => {
+    const tex = (k: string | undefined) => (k ? packTextures[k] : undefined);
+    const close = () => setMainView(null);
+    const build = <T extends { id: string; displayName?: string }>(o: {
+      list: T[];
+      docType?: ActiveDocType;
+      activeAt?: number;
+      /** opens the element's editor; omitted for elements without one (creative tabs) */
+      open?: (i: number) => void;
+      add: () => void;
+      rename: (i: number, value: string) => void;
+      /** rename edits displayName instead of the registry id */
+      renameDisplayName?: boolean;
+      remove: (i: number) => void;
+      canRemove?: boolean;
+      duplicate?: (i: number) => void;
+      exportOne?: (i: number) => void;
+      exportAll?: () => void;
+      importCategory?: ImportCategory;
+      onImport?: () => void;
+      onMove?: (from: number, to: number) => void;
+      thumb?: (spec: T) => string | undefined;
+    }): CategoryViewProps => ({
+      title: sectionLabel(key),
+      icon: sectionIcon(key),
+      entries: o.list.map((spec, i) => {
+        const label = spec.displayName || spec.id;
+        const current = o.renameDisplayName ? (spec.displayName ?? spec.id) : spec.id;
+        return {
+          key: `${spec.id}:${i}`,
+          label,
+          sublabel: spec.displayName && spec.displayName !== spec.id ? spec.id : undefined,
+          thumb: o.thumb?.(spec),
+          active: !!o.docType && activeDocType === o.docType && o.activeAt === i,
+          onOpen: o.open && (() => { close(); o.open!(i); }),
+          onRename: () => {
+            const next = window.prompt("Rename:", current);
+            if (next && next.trim() && next.trim() !== current) o.rename(i, next.trim());
+          },
+          onDuplicate: o.duplicate && (() => o.duplicate!(i)),
+          onExport: o.exportOne && (() => o.exportOne!(i)),
+          onDelete: o.canRemove === false ? undefined : () => { if (window.confirm(`Delete “${label}”?`)) o.remove(i); },
+        };
+      }),
+      // Adding opens the new element's editor (except creative tabs, which have none).
+      onNew: () => { if (o.open) close(); o.add(); },
+      onImport: o.onImport ?? (o.importCategory ? () => handleImportCategoryClick(o.importCategory!) : undefined),
+      onExportAll: o.exportAll,
+      onMove: o.onMove,
+    });
+    switch (key) {
+      case "screens": return build({ list: screens, docType: "screen", activeAt: activeIdx, open: switchScreen, add: addScreen, rename: renameScreen, remove: removeScreen, canRemove: screens.length > 1, exportOne: handleExportScreen, exportAll: handleExportAllScreens, onImport: handleImportClick, onMove: moveScreen });
+      case "items": return build({ list: items, docType: "item", activeAt: activeItemIdx, open: switchItem, add: addItem, rename: renameItem, remove: removeItem, duplicate: duplicateItem, exportOne: handleExportItem, exportAll: handleExportAllItems, importCategory: "items", thumb: (it) => tex(it.texture) });
+      case "blocks": return build({ list: blocks, docType: "block", activeAt: activeBlockIdx, open: switchBlock, add: addBlock, rename: renameBlock, remove: removeBlock, duplicate: duplicateBlock, exportOne: handleExportBlock, exportAll: handleExportAllBlocks, importCategory: "blocks", thumb: (b) => tex(b.texture) });
+      case "armors": return build({ list: armors, docType: "armor", activeAt: activeArmorIdx, open: switchArmor, add: addArmor, rename: renameArmor, remove: removeArmor, duplicate: duplicateArmor, exportOne: handleExportArmor, exportAll: handleExportAllArmors, importCategory: "armors", thumb: (a) => tex(a.iconChestplate) });
+      case "creativeTabs": return build({ list: creativeTabs, add: addCreativeTab, rename: renameCreativeTab, renameDisplayName: true, remove: removeCreativeTab });
+      case "customAttributes": return build({ list: customAttributes, docType: "attribute", activeAt: activeAttributeIdx, open: switchCustomAttribute, add: addCustomAttribute, rename: (i, displayName) => updateCustomAttribute(i, { displayName }), renameDisplayName: true, remove: removeCustomAttribute, duplicate: duplicateCustomAttribute, exportOne: handleExportCustomAttribute, exportAll: handleExportAllCustomAttributes, importCategory: "customAttributes" });
+      case "effects": return build({ list: effects, docType: "effect", activeAt: activeEffectIdx, open: switchEffect, add: addEffect, rename: renameEffect, remove: removeEffect, duplicate: duplicateEffect, exportOne: handleExportEffect, exportAll: handleExportAllEffects, importCategory: "effects", thumb: (e) => tex(e.icon) });
+      case "potions": return build({ list: potions, docType: "potion", activeAt: activePotionIdx, open: switchPotion, add: addPotion, rename: renamePotion, remove: removePotion, duplicate: duplicatePotion, exportOne: handleExportPotion, exportAll: handleExportAllPotions, importCategory: "potions" });
+      case "achievements": return build({ list: achievements, docType: "achievement", activeAt: activeAchievementIdx, open: switchAchievement, add: addAchievement, rename: renameAchievement, remove: removeAchievement, duplicate: duplicateAchievement, exportOne: handleExportAchievement, exportAll: handleExportAllAchievements, importCategory: "achievements" });
+      case "recipes": return build({ list: recipes, docType: "recipe", activeAt: activeRecipeIdx, open: switchRecipe, add: addRecipe, rename: renameRecipe, remove: removeRecipe, duplicate: duplicateRecipe, exportOne: handleExportRecipe, exportAll: handleExportAllRecipes, importCategory: "recipes" });
+      case "trades": return build({ list: trades, docType: "trade", activeAt: activeTradeIdx, open: switchTrade, add: addTrade, rename: renameTrade, remove: removeTrade, duplicate: duplicateTrade, exportOne: handleExportTrade, exportAll: handleExportAllTrades, importCategory: "trades" });
+      case "lootEntries": return build({ list: lootEntries, docType: "loot", activeAt: activeLootEntryIdx, open: switchLootEntry, add: addLootEntry, rename: renameLootEntry, remove: removeLootEntry, duplicate: duplicateLootEntry, exportOne: handleExportLootEntry, exportAll: handleExportAllLootEntries, importCategory: "lootEntries" });
+      case "biomes": return build({ list: biomes, docType: "biome", activeAt: activeBiomeIdx, open: switchBiome, add: addBiome, rename: renameBiome, remove: removeBiome, duplicate: duplicateBiome, exportOne: handleExportBiome, exportAll: handleExportAllBiomes, importCategory: "biomes" });
+      case "dimensions": return build({ list: dimensions, docType: "dimension", activeAt: activeDimensionIdx, open: switchDimension, add: addDimension, rename: renameDimension, remove: removeDimension, duplicate: duplicateDimension, exportOne: handleExportDimension, exportAll: handleExportAllDimensions, importCategory: "dimensions" });
+    }
+    const kind = key.slice(3);
+    const def = getElementKind(kind)!;
+    const list = elements[kind] ?? [];
+    const view = build({
+      list, docType: "element", activeAt: activeElementRef?.kind === kind ? activeElementRef.idx : -1,
+      open: (i) => switchElement(kind, i), add: () => addElement(kind), rename: (i, v) => renameElement(kind, i, v),
+      remove: (i) => removeElement(kind, i), duplicate: (i) => duplicateElement(kind, i),
+      exportOne: (i) => handleExportElements(kind, [list[i]], list[i].id),
+      exportAll: () => handleExportElements(kind, list, `${friendlyModId()}.${kind}`),
+      importCategory: `element:${kind}`,
+      thumb: (spec) => { const t = def.thumb?.(spec); return t ? packTextures[t] : undefined; },
+    });
+    // Tiles show the def's label field (e.g. the enchantment's name) instead of the raw id.
+    return { ...view, entries: view.entries.map((e, i) => ({ ...e, label: elementLabel(def, list[i]), sublabel: elementLabel(def, list[i]) !== list[i].id ? list[i].id : undefined })) };
+  };
+
+  // ── Generic elements (lib/elements) ─────────────────────────────────────────
+  function switchElement(kind: string, idx: number) {
+    setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeElement: { kind, idx }, activeDocType: "element" } : e));
+  }
+  function setElementList(kind: string, list: ElementSpec[], active?: number) {
+    commit({
+      ...entry,
+      elements: { ...elements, [kind]: list },
+      ...(active !== undefined ? { activeElement: { kind, idx: active }, activeDocType: "element" as const } : {}),
+    });
+  }
+  function addElement(kind: string) {
+    const def = getElementKind(kind);
+    if (!def) return;
+    const list = elements[kind] ?? [];
+    setElementList(kind, [...list, normalizeElement(def, { id: newSpecId(def.idPrefix, list) })], list.length);
+  }
+  function updateElement(kind: string, idx: number, patch: Partial<ElementSpec>) {
+    setElementList(kind, (elements[kind] ?? []).map((el, i) => (i === idx ? { ...el, ...patch } : el)));
+  }
+  /** Renames an element's registry id; returns false (with a toast) if it's empty or taken. */
+  function renameElement(kind: string, idx: number, id: string): boolean {
+    const clean = id.trim().toLowerCase().replace(/[^a-z0-9_./-]/g, "_");
+    if (!clean) return false;
+    if ((elements[kind] ?? []).some((e, i) => i !== idx && e.id === clean)) {
+      toast.error(`"${clean}" is already used by another element of this type.`);
+      return false;
+    }
+    updateElement(kind, idx, { id: clean });
+    return true;
+  }
+  function duplicateElement(kind: string, idx: number) {
+    const list = elements[kind] ?? [];
+    const copy = { ...list[idx], id: duplicateSpecId(list[idx].id, list) };
+    setElementList(kind, [...list.slice(0, idx + 1), copy, ...list.slice(idx + 1)], idx + 1);
+  }
+  function removeElement(kind: string, idx: number) {
+    const list = (elements[kind] ?? []).filter((_, i) => i !== idx);
+    const wasActive = activeElementRef?.kind === kind;
+    commit({
+      ...entry,
+      elements: { ...elements, [kind]: list },
+      ...(wasActive && activeElementRef.idx >= idx ? { activeElement: list.length ? { kind, idx: Math.max(0, activeElementRef.idx - (activeElementRef.idx > idx ? 1 : 0)) } : null } : {}),
+      ...(wasActive && list.length === 0 && activeDocType === "element" ? { activeDocType: "screen" as const } : {}),
+    });
+  }
+  async function handleExportBedrockAddon(list: ElementSpec[]) {
+    try {
+      const all = await loadAllTextures();
+      const modId = friendlyModId();
+      const blob = await buildBedrockAddon({
+        modId,
+        packName: modId,
+        entities: list.map((spec) => ({ spec, texture: typeof spec.texture === "string" && spec.texture ? all[`pack:${spec.texture}`] : undefined })),
+      });
+      downloadBlob(blob, `${list.length === 1 ? list[0].id : modId}.mcaddon`);
+      const missing = list.filter((s) => !s.texture).map((s) => s.id);
+      if (missing.length) toast.warning(`No texture: ${missing.join(", ")} — they'll show Bedrock's missing texture.`);
+    } catch (e) {
+      toast.error(`Could not export add-on: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async function handleExportElements(kind: string, list: ElementSpec[], filename: string) {
+    try {
+      await downloadExport(`${filename}.json`, JSON.stringify(list, null, 2), { elements: { [kind]: list }, modId: friendlyModId(), mcVersion });
+    } catch (e) {
+      toast.error(`Could not export: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  const handleImportCategoryClick = (category: ImportCategory) => {
+    importCategoryRef.current = category;
+    importCategoryInputRef.current?.click();
+  };
+
+  // Counterpart to the per-category "Export all": merges a category's zip/json into the current
+  // project (by id) instead of replacing the whole project like "Import project" does.
+  const handleImportCategoryFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    const category = importCategoryRef.current;
+    if (!file || !category) return;
+
+    if (category.startsWith("element:")) {
+      const kind = category.slice("element:".length);
+      const def = getElementKind(kind);
+      if (!def) return;
+      try {
+        const bundle = await readSpecBundle(file, category);
+        if (bundle.specs.length === 0) throw new Error("No entries found in this file.");
+        const merged = mergeSpecsById(elements[kind] ?? [], bundle.specs.map((raw) => normalizeElement(def, raw as ElementSpec)));
+        commit({ ...entry, elements: { ...elements, [kind]: merged.list } });
+        const parts = [`${merged.added} added`];
+        if (merged.updated > 0) parts.push(`${merged.updated} updated (same id)`);
+        if (bundle.skipped > 0) parts.push(`${bundle.skipped} skipped (no id)`);
+        toast.success(`Imported: ${parts.join(", ")}.`);
+      } catch (err) {
+        toast.error(`Could not import: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
+    const norm = <T extends { id: string }>(fn: (s: T) => T) => (raw: Record<string, unknown>) => fn(raw as unknown as T);
+    const targets: Record<ImportCategory, {
+      list: { id: string }[]; normalize: (raw: Record<string, unknown>) => { id: string }; activeKey: string; docType: ActiveDocType;
+    }> = {
+      items: { list: items, normalize: norm(normalizeItem), activeKey: "activeItemIdx", docType: "item" },
+      blocks: { list: blocks, normalize: norm(normalizeBlock), activeKey: "activeBlockIdx", docType: "block" },
+      armors: { list: armors, normalize: norm(normalizeArmor), activeKey: "activeArmorIdx", docType: "armor" },
+      customAttributes: {
+        list: customAttributes,
+        normalize: norm((a: CustomAttributeSpec) => ({ ...defaultCustomAttribute(a.id), ...a })),
+        activeKey: "activeAttributeIdx", docType: "attribute",
+      },
+      effects: { list: effects, normalize: norm(normalizeEffect), activeKey: "activeEffectIdx", docType: "effect" },
+      potions: { list: potions, normalize: norm(normalizePotion), activeKey: "activePotionIdx", docType: "potion" },
+      achievements: { list: achievements, normalize: norm(normalizeAchievement), activeKey: "activeAchievementIdx", docType: "achievement" },
+      recipes: { list: recipes, normalize: norm(normalizeRecipe), activeKey: "activeRecipeIdx", docType: "recipe" },
+      trades: { list: trades, normalize: norm(normalizeTrade), activeKey: "activeTradeIdx", docType: "trade" },
+      lootEntries: { list: lootEntries, normalize: norm(normalizeLootEntry), activeKey: "activeLootEntryIdx", docType: "loot" },
+      biomes: { list: biomes, normalize: norm(normalizeBiome), activeKey: "activeBiomeIdx", docType: "biome" },
+      dimensions: { list: dimensions, normalize: norm(normalizeDimension), activeKey: "activeDimensionIdx", docType: "dimension" },
+    };
+    const target = targets[category];
+
+    try {
+      const bundle = await readSpecBundle(file, category);
+      if (bundle.specs.length === 0) throw new Error("No entries found in this file.");
+
+      // Only fill gaps — never overwrite a texture this browser already has under that path.
+      const missing = Object.entries(bundle.textures).filter(([src]) => !packTextures[src]);
+      for (const [src, blob] of missing) await saveTexture(`pack:${src}`, blob);
+      if (missing.length > 0) await reloadTextures();
+
+      const merged = mergeSpecsById(target.list, bundle.specs.map(target.normalize));
+      commit({ ...entry, [category]: merged.list, [target.activeKey]: merged.firstIdx, activeDocType: target.docType });
+
+      const parts = [`${merged.added} added`];
+      if (merged.updated > 0) parts.push(`${merged.updated} updated (same id)`);
+      if (missing.length > 0) parts.push(`${missing.length} texture(s)`);
+      if (bundle.skipped > 0) parts.push(`${bundle.skipped} skipped (no id)`);
+      toast.success(`Imported: ${parts.join(", ")}.`);
+    } catch (err) {
+      toast.error(`Could not import: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const handleSaveToTestMod = useCallback(async () => {
@@ -1839,6 +2205,62 @@ export default function EditorPage() {
       alert(`Could not save to test mod: ${e instanceof Error ? e.message : e}`);
     }
   }, [screen]);
+
+  // ── AI bridge (MCP server in webapp/mcp/server.mjs) ──
+  const bridgeEnabled = useBridgeEnabled();
+  // Bridge commands can arrive faster than React re-renders: they read and write this ref, which
+  // always holds the newest history entry (synced from renders, e.g. after the user's undo).
+  const latestEntryRef = useRef(entry);
+  useEffect(() => { latestEntryRef.current = entry; }, [entry]);
+  const commitLatest = (fn: (cur: HistoryEntry) => HistoryEntry) => {
+    const next = fn(latestEntryRef.current);
+    latestEntryRef.current = next;
+    commit(next);
+  };
+  const editorApi = (): EditorApi => ({
+    projectName: projectKey,
+    modId: friendlyModId(),
+    mcVersion,
+    elements: latestEntryRef.current.elements,
+    kinds: ELEMENT_KINDS,
+    activeDoc: activeDocType,
+    activeElement: activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null,
+    counts: {
+      screens: screens.length, items: items.length, blocks: blocks.length, armors: armors.length,
+      ...Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).length])),
+    },
+    packTextures,
+    setElements: (kind, list, open) => {
+      commitLatest((cur) => ({
+        ...cur,
+        elements: { ...cur.elements, [kind]: list },
+        ...(open !== undefined ? { activeElement: { kind, idx: open }, activeDocType: "element" as const } : {}),
+      }));
+      if (open !== undefined) setMainView(null);
+    },
+    openElement: (kind, index) => {
+      setMainView(null);
+      const next = { ...latestEntryRef.current, activeElement: { kind, idx: index }, activeDocType: "element" as const };
+      latestEntryRef.current = next;
+      setHistory((h) => h.map((e, i) => (i === cursorRef.current ? { ...e, activeElement: { kind, idx: index }, activeDocType: "element" } : e)));
+    },
+    uploadTexture: uploadCustomTexture,
+  });
+  const editorApiRef = useRef(editorApi);
+  useEffect(() => { editorApiRef.current = editorApi; });
+  const bridge = useMcpBridge(
+    bridgeEnabled, 8790,
+    (cmd) => runTool(() => editorApiRef.current(), cmd.tool, cmd.args),
+    () => ({ project: projectKey, modId: friendlyModId() }),
+  );
+  // Entity Model Generator: its agent run starts its own MCP server on a free port — bridge to it
+  // for the run, with the same tool executor as the regular bridge.
+  const agentRun = useAgentRun();
+  const agentBridge = useMcpBridge(
+    agentRun.port !== null, agentRun.port ?? 0,
+    (cmd) => runTool(() => editorApiRef.current(), cmd.tool, cmd.args),
+    () => ({ project: projectKey, modId: friendlyModId() }),
+  );
 
   if (!projectLoaded || !initialized) {
     return (
@@ -1857,163 +2279,29 @@ export default function EditorPage() {
         onSelect={() => {}}
         onClose={() => setShowTextureDebug(false)}
       />
+      {/* Only the icon rail remains, but LayersTree's menu items still read the sidebar context. */}
       <SidebarProvider>
         {!tryMode && (
           <AppSidebar
-            screens={screens}
-            activeIdx={activeIdx}
-            modId={screen.modId}
-            widgets={screen.widgets}
-            selectedId={selectedId}
-            selectedIds={selectedIds}
+            active={railActive}
             onGoHome={() => router.push("/")}
-            onSelectScreen={switchScreen}
-            onAddScreen={addScreen}
-            onRemoveScreen={removeScreen}
-            onRenameScreen={renameScreen}
-            onMoveScreen={moveScreen}
-            onImportScreen={handleImportClick}
-            onExportScreen={handleExportScreen}
-            onExportAllScreens={handleExportAllScreens}
-            items={items}
-            blocks={blocks}
-            activeDocType={activeDocType}
-            activeItemIdx={activeItemIdx}
-            activeBlockIdx={activeBlockIdx}
-            onSelectItem={switchItem}
-            onAddItem={addItem}
-            onRemoveItem={removeItem}
-            onRenameItem={renameItem}
-            onDuplicateItem={duplicateItem}
-            onExportItem={handleExportItem}
-            onExportAllItems={handleExportAllItems}
-            onSelectBlock={switchBlock}
-            onAddBlock={addBlock}
-            onRemoveBlock={removeBlock}
-            onRenameBlock={renameBlock}
-            onDuplicateBlock={duplicateBlock}
-            onExportBlock={handleExportBlock}
-            onExportAllBlocks={handleExportAllBlocks}
-            templates={templates}
-            itemTemplates={itemTemplates}
-            blockTemplates={blockTemplates}
-            onSaveTemplate={handleSaveTemplate}
-            onInsertTemplate={handleInsertTemplate}
-            onRenameTemplate={handleRenameTemplate}
-            onDeleteTemplate={handleDeleteTemplate}
-            creativeTabs={creativeTabs}
-            onAddCreativeTab={addCreativeTab}
-            onRenameCreativeTab={renameCreativeTab}
-            onRemoveCreativeTab={removeCreativeTab}
-            attributePresets={attributePresets}
-            onSaveAttributePreset={handleSaveAttributePreset}
-            onApplyAttributePreset={handleApplyAttributePreset}
-            onRenameAttributePreset={handleRenameAttributePreset}
-            onDeleteAttributePreset={handleDeleteAttributePreset}
-            customAttributes={customAttributes}
-            activeAttributeIdx={activeAttributeIdx}
-            onSelectCustomAttribute={switchCustomAttribute}
-            onAddCustomAttribute={addCustomAttribute}
-            onRenameCustomAttribute={(idx, displayName) => updateCustomAttribute(idx, { displayName })}
-            onRemoveCustomAttribute={removeCustomAttribute}
-            onDuplicateCustomAttribute={duplicateCustomAttribute}
-            onExportCustomAttribute={handleExportCustomAttribute}
-            onExportAllCustomAttributes={handleExportAllCustomAttributes}
-            effects={effects}
-            activeEffectIdx={activeEffectIdx}
-            onSelectEffect={switchEffect}
-            onAddEffect={addEffect}
-            onRenameEffect={renameEffect}
-            onRemoveEffect={removeEffect}
-            onDuplicateEffect={duplicateEffect}
-            onExportEffect={handleExportEffect}
-            onExportAllEffects={handleExportAllEffects}
-            potions={potions}
-            activePotionIdx={activePotionIdx}
-            onSelectPotion={switchPotion}
-            onAddPotion={addPotion}
-            onRenamePotion={renamePotion}
-            onRemovePotion={removePotion}
-            onDuplicatePotion={duplicatePotion}
-            onExportPotion={handleExportPotion}
-            onExportAllPotions={handleExportAllPotions}
-            achievements={achievements}
-            activeAchievementIdx={activeAchievementIdx}
-            onSelectAchievement={switchAchievement}
-            onAddAchievement={addAchievement}
-            onRenameAchievement={renameAchievement}
-            onRemoveAchievement={removeAchievement}
-            onDuplicateAchievement={duplicateAchievement}
-            onExportAchievement={handleExportAchievement}
-            onExportAllAchievements={handleExportAllAchievements}
-            recipes={recipes}
-            activeRecipeIdx={activeRecipeIdx}
-            onSelectRecipe={switchRecipe}
-            onAddRecipe={addRecipe}
-            onRenameRecipe={renameRecipe}
-            onRemoveRecipe={removeRecipe}
-            onDuplicateRecipe={duplicateRecipe}
-            onExportRecipe={handleExportRecipe}
-            onExportAllRecipes={handleExportAllRecipes}
-            trades={trades}
-            activeTradeIdx={activeTradeIdx}
-            onSelectTrade={switchTrade}
-            onAddTrade={addTrade}
-            onRenameTrade={renameTrade}
-            onRemoveTrade={removeTrade}
-            onDuplicateTrade={duplicateTrade}
-            onExportTrade={handleExportTrade}
-            onExportAllTrades={handleExportAllTrades}
-            lootEntries={lootEntries}
-            activeLootEntryIdx={activeLootEntryIdx}
-            onSelectLootEntry={switchLootEntry}
-            onAddLootEntry={addLootEntry}
-            onRenameLootEntry={renameLootEntry}
-            onRemoveLootEntry={removeLootEntry}
-            onDuplicateLootEntry={duplicateLootEntry}
-            onExportLootEntry={handleExportLootEntry}
-            onExportAllLootEntries={handleExportAllLootEntries}
-            biomes={biomes}
-            activeBiomeIdx={activeBiomeIdx}
-            onSelectBiome={switchBiome}
-            onAddBiome={addBiome}
-            onRenameBiome={renameBiome}
-            onRemoveBiome={removeBiome}
-            onDuplicateBiome={duplicateBiome}
-            onExportBiome={handleExportBiome}
-            onExportAllBiomes={handleExportAllBiomes}
-            dimensions={dimensions}
-            activeDimensionIdx={activeDimensionIdx}
-            onSelectDimension={switchDimension}
-            onAddDimension={addDimension}
-            onRenameDimension={renameDimension}
-            onRemoveDimension={removeDimension}
-            onDuplicateDimension={duplicateDimension}
-            onExportDimension={handleExportDimension}
-            onExportAllDimensions={handleExportAllDimensions}
-            armors={armors}
-            activeArmorIdx={activeArmorIdx}
-            onSelectArmor={switchArmor}
-            onAddArmor={addArmor}
-            onRenameArmor={renameArmor}
-            onRemoveArmor={removeArmor}
-            onDuplicateArmor={duplicateArmor}
-            onExportArmor={handleExportArmor}
-            onExportAllArmors={handleExportAllArmors}
-            onOpenTextureEditor={() => openTextureEditor()}
-            onOpenExistingTexture={openExistingTexture}
-            onAddWidget={addWidget}
-            onSelectWidget={selectWidgetInTree}
-            onDeleteWidget={deleteWidget}
-            onToggleHiddenWidget={toggleHiddenWidget}
-            onRenameWidget={renameWidget}
-            onReparentWidget={reparentWidget}
-            onReorderWidget={reorderWidget}
+            onOpenAll={() => setMainView({ kind: "workspace" })}
+            onOpenSection={(key) => setMainView({ kind: "section", key })}
+            onOpenSettings={() => setRailSettingsOpen(true)}
           />
         )}
+        <SettingsDialog
+          open={railSettingsOpen}
+          onOpenChange={setRailSettingsOpen}
+          screen={screen}
+          onScreenChange={(patch) => commitScreen({ ...screen, ...patch })}
+          onResetTextures={handleResetTextures}
+          onViewTextures={() => setShowTextureDebug(true)}
+          onExtractPack={extractPack}
+        />
 
         <div className="flex flex-1 flex-col overflow-hidden h-svh">
-          {activeDocType === "screen" ? (
+          {activeDocType === "screen" && !activeMainView ? (
             <Toolbar
               screen={screen}
               gridSize={gridSize}
@@ -2052,7 +2340,7 @@ export default function EditorPage() {
               modId={screen.modId}
             />
           ) : (
-            <div className="flex h-9 shrink-0 items-center gap-1 border-b px-2">
+            <div className="flex h-9 shrink-0 items-center gap-1 border-b bg-sidebar px-2">
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={undo} disabled={cursor === 0}>Undo</Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={redo} disabled={cursor >= history.length - 1}>Redo</Button>
               <div className="flex-1" />
@@ -2061,11 +2349,36 @@ export default function EditorPage() {
             </div>
           )}
 
+          {showWorkspace ? (
+            <WorkspaceOverview sections={workspaceSections()} />
+          ) : activeMainView === "resources" ? (
+            <ResourcesPanel
+              onEditTexture={(k) => { setMainView(null); openExistingTexture(k); }}
+              onNewTexture={() => { setMainView(null); openTextureEditor(); }}
+            />
+          ) : activeMainView === "skinGenerator" ? (
+            <ItemSkinGeneratorPanel
+              items={items}
+              onApplyToItem={(idx, texture) => commit({ ...entry, items: items.map((it, i) => i === idx ? { ...it, texture } : it) })}
+              onOpenItem={(idx) => { setMainView(null); switchItem(idx); }}
+              blocks={blocks}
+              onApplyToBlock={(idx, texture) => commit({ ...entry, blocks: blocks.map((b, i) => i === idx ? { ...b, texture } : b) })}
+              onOpenBlock={(idx) => { setMainView(null); switchBlock(idx); }}
+            />
+          ) : activeMainView === "modelGenerator" ? (
+            <EntityModelGeneratorPanel
+              activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
+              onOpenModels={() => setMainView({ kind: "section", key: "el:entityModel" })}
+            />
+          ) : mainView?.kind === "section" && mainView.key !== "resources" && mainView.key !== "skinGenerator" && mainView.key !== "modelGenerator" ? (
+            // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
+            <CategoryView key={mainView.key} {...categoryView(mainView.key)} />
+          ) : (
           <div className="flex flex-1 overflow-hidden">
             {activeDocType === "screen" ? (
               <div
                 ref={canvasWrapperRef}
-                className="flex flex-1 overflow-hidden p-8"
+                className="flex flex-1 overflow-hidden bg-[var(--workspace)] p-8"
                 onMouseDown={(e) => {
                   if (e.target !== e.currentTarget) return; // only the wrapper background, not canvas
                   if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
@@ -2094,7 +2407,7 @@ export default function EditorPage() {
                     commitScreen({ ...screen, widgets: merged });
                   }}
                   bindingsSchema={screen.bindingsSchema ?? {}}
-                  onAddWidget={(type, x, y) => addWidget(type, undefined, x, y)}
+                  onAddWidget={(type, x, y, parentId) => addWidget(type, parentId, x, y)}
                 />
                 </div>
               </div>
@@ -2118,6 +2431,51 @@ export default function EditorPage() {
                 onSave={handleTextureEditorSave}
                 onBack={textureEditorReturnTo ? handleTextureEditorBack : undefined}
               />
+            ) : activeDocType === "element" && activeElementDef?.customEditor === "model" && activeElement ? (
+              <ModelEditor
+                key={`${activeElementDef.kind}:${activeElementRef?.idx}`}
+                id={activeElement.id}
+                model={activeElement as unknown as EntityModel}
+                modId={friendlyModId()}
+                mcVersion={mcVersion}
+                onChange={(m) => updateElement(activeElementDef.kind, activeElementRef!.idx, m as unknown as Partial<ElementSpec>)}
+                settings={{ ...defaultEntitySettings(), ...((activeElement.entity as Record<string, unknown>) ?? {}) }}
+                onSettingsChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx, {
+                  entity: { ...defaultEntitySettings(), ...((activeElement.entity as Record<string, unknown>) ?? {}), ...patch },
+                })}
+                onRename={(newId) => renameElement(activeElementDef.kind, activeElementRef!.idx, newId)}
+                onExportBedrockAddon={(scope) => handleExportBedrockAddon(scope === "this" ? [activeElement] : (elements[activeElementDef.kind] ?? []))}
+                fieldCtx={{
+                  modId: friendlyModId(),
+                  mcVersion,
+                  projectItems: items.map((it) => `${friendlyModId()}:${it.id}`),
+                  projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
+                  projectScreens: screens.map((s) => s.id),
+                  elementIds: Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])),
+                }}
+              />
+            ) : activeDocType === "element" ? (
+              <div className="flex-1 overflow-y-auto">
+                <div className="mx-auto max-w-3xl">
+                  {activeElement && activeElementDef ? (
+                    <ElementEditor
+                      key={`${activeElementDef.kind}:${activeElementRef?.idx}`}
+                      def={activeElementDef}
+                      spec={activeElement}
+                      ctx={{
+                        modId: friendlyModId(),
+                        mcVersion,
+                        projectItems: items.map((it) => `${friendlyModId()}:${it.id}`),
+                        projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
+                        projectScreens: screens.map((s) => s.id),
+                      }}
+                      onChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx, patch)}
+                    />
+                  ) : (
+                    <div className="p-6 text-sm text-muted-foreground">This element no longer exists — pick another one from the sidebar.</div>
+                  )}
+                </div>
+              </div>
             ) : activeDocType === "attribute" ? (
               // The properties form gets the main window instead of the cramped 256px aside — same
               // "form needs real width" reasoning as Dimension originally, now applied uniformly to
@@ -2250,8 +2608,43 @@ export default function EditorPage() {
               </div>
             )}
 
-            {!tryMode && activeDocType !== "texture" && (
-              <aside className="w-64 shrink-0 border-l bg-background overflow-y-auto">
+            {!tryMode && activeDocType !== "texture" && !(activeDocType === "element" && activeElementDef?.customEditor) && (
+              <aside className="flex w-64 shrink-0 flex-col overflow-hidden border-l bg-sidebar">
+                {(activeDocType === "screen" || activeDocType === "item" || activeDocType === "block") && (
+                  <>
+                    {activeDocType === "screen" && (
+                      <LayersSection
+                        widgets={screen.widgets}
+                        selectedId={selectedId}
+                        selectedIds={selectedIds}
+                        onSelect={selectWidgetInTree}
+                        onAdd={addWidget}
+                        onDelete={deleteWidget}
+                        onToggleHidden={toggleHiddenWidget}
+                        onRename={renameWidget}
+                        onReorder={reorderWidget}
+                      />
+                    )}
+                    <TemplatesSection
+                      docLabel={activeDocType}
+                      templates={activeDocType === "item" ? itemTemplates : activeDocType === "block" ? blockTemplates : templates}
+                      onSave={handleSaveTemplate}
+                      onInsert={handleInsertTemplate}
+                      onRename={handleRenameTemplate}
+                      onDelete={handleDeleteTemplate}
+                    />
+                    {activeDocType === "item" && (
+                      <AttributePresetsSection
+                        presets={attributePresets}
+                        onSave={handleSaveAttributePreset}
+                        onApply={handleApplyAttributePreset}
+                        onRename={handleRenameAttributePreset}
+                        onDelete={handleDeleteAttributePreset}
+                      />
+                    )}
+                  </>
+                )}
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 {activeDocType === "screen" ? (
                   <PropertyPanel
                     widget={selectedWidget}
@@ -2266,6 +2659,10 @@ export default function EditorPage() {
                     }}
                     inventoryAreaIds={screen.widgets.filter((w) => w.type === "inventory_area").map((w) => w.id)}
                   />
+                ) : activeDocType === "element" ? (
+                  activeElement && activeElementDef
+                    ? <ElementFilesPreview def={activeElementDef} spec={activeElement} modId={friendlyModId()} mcVersion={mcVersion} />
+                    : null
                 ) : activeDocType === "attribute" ? (
                   <div className="flex flex-1 items-center justify-center p-4">
                     <CustomAttributePreview attribute={activeCustomAttribute} />
@@ -2317,8 +2714,70 @@ export default function EditorPage() {
                     />
                   </div>
                 )}
+                </div>
               </aside>
             )}
+          </div>
+          )}
+
+          {/* ── Status bar (MCreator-style) ── */}
+          <div className="flex h-6 shrink-0 items-center gap-3 border-t bg-[var(--statusbar)] px-3 text-[11px] text-muted-foreground">
+            {showWorkspace ? (
+              <span className="text-foreground">Workspace overview</span>
+            ) : mainView?.kind === "section" ? (
+              <span className="text-foreground">{sectionLabel(mainView.key)}</span>
+            ) : activeDocType === "screen" ? (
+              <>
+                <span className="text-foreground">{screen.id}</span>
+                <span>{screen.width}×{screen.height}</span>
+                <span>{screen.widgets.length} widget{screen.widgets.length === 1 ? "" : "s"}</span>
+                {selectedIds.length > 0 && <span>Selected: {selectedIds.length > 1 ? `${selectedIds.length} widgets` : selectedIds[0]}</span>}
+                <span>Zoom {Math.round(scale)}×</span>
+                {tryMode && <span className="font-medium text-primary">Try mode</span>}
+              </>
+            ) : activeDocType === "element" && activeElementDef && activeElement ? (
+              <span className="text-foreground">{activeElementDef.label} · <span className="font-mono">{friendlyModId()}:{activeElement.id}</span></span>
+            ) : (
+              <span className="capitalize text-foreground">{activeDocType}</span>
+            )}
+            {agentRun.running && (
+              <span className="ml-auto flex items-center gap-1.5" data-testid="model-generator-status">
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 rounded-sm px-1 text-foreground hover:bg-accent"
+                  title="Entity Model Generator is building — click to see its log"
+                  onClick={() => setMainView({ kind: "section", key: "modelGenerator" })}
+                >
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
+                  Model generator{agentBridge.lastTool ? ` · ${agentBridge.lastTool}` : " · starting"}
+                </button>
+                <button type="button" className="rounded-sm px-1 hover:bg-destructive hover:text-white" onClick={stopAgentRun}>Stop</button>
+              </span>
+            )}
+            <button
+              type="button"
+              className={`${agentRun.running ? "" : "ml-auto "}flex items-center gap-1.5 rounded-sm px-1 hover:bg-accent hover:text-foreground`}
+              title={bridgeEnabled
+                ? `AI bridge ${bridge.status} (MCP server on 127.0.0.1:8790)${bridge.lastTool ? ` — last: ${bridge.lastTool}` : ""}. Click to turn off.`
+                : "Let an AI client (Claude Code via the mc-designer MCP server) work in this editor. Click to turn on."}
+              onClick={() => setBridgeEnabled(!bridgeEnabled)}
+              data-testid="ai-bridge-toggle"
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${!bridgeEnabled ? "bg-muted-foreground/40" : bridge.status === "connected" ? "bg-green-500" : bridge.status === "busy" ? "animate-pulse bg-primary" : "bg-amber-500"}`} />
+              AI bridge{bridgeEnabled ? (bridge.status === "connecting" ? " · waiting for MCP server" : bridge.status === "busy" ? ` · ${bridge.lastTool}` : " · on") : ""}
+            </button>
+            <label className="flex items-center gap-1" title="Minecraft version the project's files are generated for">
+              Minecraft
+              <select
+                aria-label="Minecraft version"
+                className="h-5 rounded-sm border border-input bg-transparent px-1 text-[11px] text-foreground [&>option]:bg-popover"
+                value={mcVersion}
+                onChange={(e) => commit({ ...entry, mcVersion: normalizeMcVersion(e.target.value) })}
+              >
+                {MC_VERSIONS.map((v) => <option key={v} value={v}>{MC_VERSION_LABELS[v]}</option>)}
+              </select>
+            </label>
+            <span>{screen.modId || "Unnamed project"}</span>
           </div>
         </div>
 
@@ -2335,6 +2794,13 @@ export default function EditorPage() {
           accept=".json,application/json"
           className="hidden"
           onChange={handleImportProjectFile}
+        />
+        <input
+          ref={importCategoryInputRef}
+          type="file"
+          accept=".zip,.json,application/zip,application/json"
+          className="hidden"
+          onChange={handleImportCategoryFile}
         />
       </SidebarProvider>
     </>

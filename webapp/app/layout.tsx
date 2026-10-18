@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { TextureProvider } from "@/lib/TextureContext";
 import { PostHogProvider } from "@/components/PostHogProvider";
 import { Toaster } from "@/components/ui/sonner";
+import { NextDevToolsVisibility } from "@/lib/devToolsSetting";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,6 +43,7 @@ export default function RootLayout({
           <PostHogProvider>
             <TextureProvider>{children}</TextureProvider>
             <Toaster />
+            <NextDevToolsVisibility />
           </PostHogProvider>
         </ThemeProvider>
       </body>

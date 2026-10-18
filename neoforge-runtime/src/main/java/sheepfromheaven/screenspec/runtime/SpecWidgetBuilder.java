@@ -172,19 +172,44 @@ final class SpecWidgetBuilder {
         }
     }
 
+    /** Which edge a {@code tabs} widget's tab strip sits on ({@code tab_position} prop, default top). */
+    static TabButtonWidget.Side tabSide(WidgetSpec tabsWidget) {
+        return switch (tabsWidget.prop("tab_position", "top")) {
+            case "left"  -> TabButtonWidget.Side.LEFT;
+            case "right" -> TabButtonWidget.Side.RIGHT;
+            default      -> TabButtonWidget.Side.TOP;
+        };
+    }
+
+    /**
+     * Absolute {x, y, w, h} of a {@code tabs} widget's content pane — the widget minus its tab
+     * strip. {@code tab_height} is the strip's thickness: its height for top tabs, its width for
+     * side tabs. Mirrors the webapp's {@code tabContentRect}.
+     */
+    int[] tabBodyRect(WidgetSpec tabsWidget) {
+        int[] o = originOf(tabsWidget);
+        int strip = tabsWidget.propInt("tab_height", 20);
+        return switch (tabSide(tabsWidget)) {
+            case LEFT  -> new int[]{ o[0] + strip, o[1], tabsWidget.w - strip, tabsWidget.h };
+            case RIGHT -> new int[]{ o[0], o[1], tabsWidget.w - strip, tabsWidget.h };
+            case TOP   -> new int[]{ o[0], o[1] + strip, tabsWidget.w, tabsWidget.h - strip };
+        };
+    }
+
     /**
      * Resolves a widget's absolute screen position by walking its {@code parentId} chain.
-     * A {@code tab} widget's content starts at its parent {@code tabs} widget's origin plus
-     * {@code tab_height}; for all other widgets the offset is additive.
+     * A {@code tab} widget's content starts at its parent {@code tabs} widget's content pane
+     * (see {@link #tabBodyRect}); for all other widgets the offset is additive.
      */
     int[] originOf(WidgetSpec w) {
         if (w.parentId == null) return new int[]{ baseX.getAsInt() + w.x, baseY.getAsInt() + w.y };
         WidgetSpec parent = byId.get(w.parentId);
         if (parent == null) return new int[]{ baseX.getAsInt() + w.x, baseY.getAsInt() + w.y };
-        int[] po = originOf(parent);
         if ("tab".equals(w.type) && "tabs".equals(parent.type)) {
-            return new int[]{ po[0], po[1] + parent.propInt("tab_height", 20) };
+            int[] body = tabBodyRect(parent);
+            return new int[]{ body[0], body[1] };
         }
+        int[] po = originOf(parent);
         return new int[]{ po[0] + w.x, po[1] + w.y };
     }
 
@@ -246,6 +271,11 @@ final class SpecWidgetBuilder {
         int[] origin   = originOf(tabsWidget);
         int   headerH  = tabsWidget.propInt("tab_height", 20);
         String activeId = activeTabByTabsWidget.get(tabsWidget.id);
+        TabButtonWidget.Side side = tabSide(tabsWidget);
+        if (side != TabButtonWidget.Side.TOP) {
+            forEachSideTab(tabsWidget, tabs, side, origin, headerH, activeId, visitor);
+            return;
+        }
         boolean hasLayout = tabs.stream().anyMatch(t -> t.w > 0);
         int gap      = 2;
         int defaultW = hasLayout ? 0 : Math.max(8, (tabsWidget.w - gap * Math.max(0, tabs.size()-1)) / tabs.size());
@@ -267,14 +297,59 @@ final class SpecWidgetBuilder {
         }
     }
 
+    /**
+     * Side (left/right) tabs: stacked top-to-bottom, evenly sharing the widget's height (no
+     * per-tab layout) — mirrors the webapp's {@code computeSideTabLayout}. {@code tab_height} is
+     * the strip's width. Same overlap rules as top tabs, turned sideways: the active tab reaches
+     * {@link #TAB_OVERLAP}px into the body; inactive ones sit 2px further out and are 2px thinner.
+     */
+    private void forEachSideTab(WidgetSpec tabsWidget, List<WidgetSpec> tabs, TabButtonWidget.Side side,
+                                int[] origin, int strip, String activeId, TabVisitor visitor) {
+        int gap = 2;
+        int n   = tabs.size();
+        int len = Math.max(16, (tabsWidget.h - gap * (n - 1)) / n);
+        boolean left = side == TabButtonWidget.Side.LEFT;
+        int cursor = 0;
+        for (WidgetSpec tab : tabs) {
+            boolean isActive = tab.id.equals(activeId);
+            // For side tabs LEFT/MIDDLE/RIGHT mean top/middle/bottom of the strip — picks the
+            // tab_{left,right}_{top,middle,bottom} sprite whose corner art meets the body's corner.
+            TabButtonWidget.Position pos = cursor <= 0
+                    ? TabButtonWidget.Position.LEFT
+                    : cursor + len >= tabsWidget.h
+                        ? TabButtonWidget.Position.RIGHT
+                        : TabButtonWidget.Position.MIDDLE;
+            int btnW = isActive ? (strip + TAB_OVERLAP) : (strip - 2);
+            int btnX = left
+                    ? origin[0] + (isActive ? 0 : 2)
+                    : origin[0] + tabsWidget.w - strip - (isActive ? TAB_OVERLAP : 0);
+            visitor.visit(tab, pos, isActive, btnX, origin[1] + cursor, btnW, len);
+            cursor += len + gap;
+        }
+    }
+
+    /**
+     * Grows an inactive tab's selector bounds (from {@link #forEachTab}) by {@link #TAB_OVERLAP}
+     * toward the body, so the screens' background pass can tuck its edge behind the body panel.
+     * Returns {x, y, w, h}.
+     */
+    int[] inactiveTabSpriteBounds(WidgetSpec tabsWidget, int x, int y, int w, int h) {
+        return switch (tabSide(tabsWidget)) {
+            case LEFT  -> new int[]{ x, y, w + TAB_OVERLAP, h };
+            case RIGHT -> new int[]{ x - TAB_OVERLAP, y, w + TAB_OVERLAP, h };
+            case TOP   -> new int[]{ x, y, w, h + TAB_OVERLAP };
+        };
+    }
+
     private void buildTabSelector(WidgetSpec tabsWidget) {
         String tabsId = tabsWidget.id;
         boolean nested = tabsWidget.parentId != null;
+        TabButtonWidget.Side side = tabSide(tabsWidget);
         forEachTab(tabsWidget, (tab, pos, isActive, x, y, w, h) -> {
             String tabId = tab.id;
             Button btn = Button.builder(Component.literal(tab.text), b -> switchTabCallback.accept(tabsId, tabId))
                 .bounds(x, y, w, h)
-                .build(b -> new TabButtonWidget(b, renderer, pos, nested));
+                .build(b -> new TabButtonWidget(b, renderer, pos, side, nested));
             btn.active = !isActive;
             ((TabButtonWidget) btn).setSelected(isActive);
             addWidget.apply(btn);

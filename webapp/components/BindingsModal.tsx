@@ -128,7 +128,7 @@ export default function BindingsModal({ schema, onChangeSchema, actions, onChang
 
   return (
     <>
-      <Button variant="ghost" size="sm" className="h-8 w-8 px-0" title="Edit bindings schema" onClick={handleOpen}>
+      <Button variant="ghost" size="sm" className="h-7 w-7 px-0" title="Edit bindings schema" onClick={handleOpen}>
         <Network className="h-4 w-4" />
       </Button>
 

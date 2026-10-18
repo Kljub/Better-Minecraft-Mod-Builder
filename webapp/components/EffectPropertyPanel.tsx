@@ -122,6 +122,7 @@ export default function EffectPropertyPanel({ effect, customAttributes, onUpdate
           attributeLabels={attributeLabels}
           onChange={setAttributes}
           addLabel="+ Add attribute modifier"
+          aiContext={{ target: "effect", name: effect.displayName, category: effect.category, customAttributes }}
         />
       </div>
     </div>

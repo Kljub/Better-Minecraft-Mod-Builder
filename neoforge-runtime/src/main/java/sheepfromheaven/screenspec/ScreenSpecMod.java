@@ -10,6 +10,7 @@ import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import sheepfromheaven.screenspec.runtime.ModContent;
+import sheepfromheaven.screenspec.runtime.ModElements;
 import sheepfromheaven.screenspec.runtime.armor.ArmorSpec;
 import sheepfromheaven.screenspec.runtime.armor.ArmorSpecLoader;
 import sheepfromheaven.screenspec.runtime.attribute.CustomAttributeSpec;
@@ -59,6 +60,7 @@ public class ScreenSpecMod {
             List<EffectSpec> effects = EffectSpecLoader.fromClasspath(namespace);
             List<PotionSpec> potions = PotionSpecLoader.fromClasspath(namespace);
             List<ArmorSpec> armors = ArmorSpecLoader.fromClasspath(namespace);
+            ModElements.register(namespace, modBus);
             if (items.isEmpty() && blocks.isEmpty() && customAttributes.isEmpty() && effects.isEmpty()
                     && potions.isEmpty() && armors.isEmpty()) continue;
             ModContent.register(namespace, modBus, items, blocks, customAttributes, effects, potions, armors);

@@ -22,7 +22,9 @@ import { tabsMinWidth, reflowTabsForWidth, computeTabLayout, TAB_GAP, NESTED_TAB
 import { TabsTopTryHeader } from "@/components/widgets/tabs/top/TabsTopTryHeader";
 import { TabsNestedEditHeader } from "@/components/widgets/tabs/nested/TabsNestedEditHeader";
 import { TabsNestedTryHeader } from "@/components/widgets/tabs/nested/TabsNestedTryHeader";
-import { computeDragBounds, computeResizeBounds, findAxisAlignment } from "@/lib/widgetBounds";
+import { TabsSideEditHeader } from "@/components/widgets/tabs/side/TabsSideEditHeader";
+import { TabsSideTryHeader } from "@/components/widgets/tabs/side/TabsSideTryHeader";
+import { computeDragBounds, computeResizeBounds, findAxisAlignment, tabContentRect, tabSide } from "@/lib/widgetBounds";
 import { GuideLines, type DragGuidesInfo, type AlignmentLine } from "@/components/DragGuides";
 import { GroupSelectionOverlay, type GroupDragInfo } from "@/components/GroupSelectionOverlay";
 
@@ -83,7 +85,8 @@ interface Props {
   onToggleSelect: (id: string) => void;
   onUpdateWidget: (widget: WidgetSpec) => void;
   onUpdateWidgets: (widgets: WidgetSpec[]) => void;
-  onAddWidget?: (type: string, x: number, y: number) => void;
+  /** x/y are relative to `parentId`'s content origin (or the canvas when parentId is undefined). */
+  onAddWidget?: (type: string, x: number, y: number, parentId?: string) => void;
 }
 
 // Whether `widget`'s "visible" binding (if any) currently resolves to true, using the
@@ -249,6 +252,52 @@ export default function Canvas({
   // no way to move a *different* (ancestor) widget instead of itself. Rnd's
   // built-in dragging is disabled everywhere (see EditWidget); this handler
   // is the sole source of drag movement, keyed to the resolved target only.
+  // Right-click "Add widget" lands in the deepest visible container under the
+  // cursor — for a `tabs` widget that's its currently shown tab — instead of
+  // always at the root, where it would float over every tab pane at once.
+  // Returned x/y are relative to that container's content origin.
+  const resolveAddTarget = (px: number, py: number, excludeId?: string): { parentId?: string; x: number; y: number } => {
+    let result: { parentId?: string; x: number; y: number } = { x: px, y: py };
+    const descend = (list: WidgetSpec[], ox: number, oy: number) => {
+      // Last in the list renders on top, so it wins overlaps.
+      for (let i = list.length - 1; i >= 0; i--) {
+        const c = list[i];
+        if (c.id === excludeId) continue;
+        if (!CONTAINER_TYPES.has(c.type) || c.type === "tab" || c.hidden || !isConditionallyVisible(c, bindingsSchema)) continue;
+        const ax = ox + c.x, ay = oy + c.y;
+        if (px < ax || px >= ax + c.w || py < ay || py >= ay + c.h) continue;
+        if (c.type === "tabs") {
+          const pane = tabContentRect(c);
+          const tabs = (childMap.get(c.id) ?? []).filter(t => t.type === "tab" && isConditionallyVisible(t, bindingsSchema));
+          const stored = activeTabIds.get(c.id);
+          const active = tabs.find(t => t.id === stored) ?? tabs[0];
+          const cx = ax + pane.x, cy = ay + pane.y;
+          if (!active || active.hidden || px < cx || px >= cx + pane.w || py < cy || py >= cy + pane.h) return;
+          result = { parentId: active.id, x: px - cx, y: py - cy };
+          descend(childMap.get(active.id) ?? [], cx, cy);
+        } else {
+          result = { parentId: c.id, x: px - ax, y: py - ay };
+          descend(childMap.get(c.id) ?? [], ax, ay);
+        }
+        return;
+      }
+    };
+    descend(rootWidgets, 0, 0);
+    return result;
+  };
+
+  // A root widget dropped fully inside a container (for `tabs`: the shown tab's
+  // pane) moves into it, so it only shows on that tab instead of floating over
+  // all of them. Widgets that don't fit, or are already nested, stay as they are.
+  const adoptIntoContainer = (w: WidgetSpec): WidgetSpec => {
+    if (w.parentId) return w;
+    const t = resolveAddTarget(w.x, w.y, w.id);
+    if (!t.parentId) return w;
+    const moved = { ...w, parentId: t.parentId, x: t.x, y: t.y };
+    const { maxX, maxY } = computeDragBounds(moved, widgets, width, height);
+    return t.x <= maxX && t.y <= maxY ? moved : w;
+  };
+
   const handleCanvasContextMenu = (e: React.MouseEvent) => {
     if (tryMode || !onAddWidget) return;
     e.preventDefault();
@@ -261,6 +310,10 @@ export default function Canvas({
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (tryMode) return;
     if (e.button !== 0) return; // ignore right/middle click — right-click is handled by contextmenu
+    // React bubbles events from portals (e.g. the right-click add-widget menu) up through this
+    // handler even though they're outside the canvas DOM — handling them here would close the
+    // menu on mousedown, before its item's click ever fires.
+    if (!canvasRef.current?.contains(e.target as Node)) return;
     // Commit any active inline text edit. e.preventDefault() below suppresses the normal
     // focus-transfer that would blur the input automatically, so we do it explicitly.
     if (document.activeElement instanceof HTMLInputElement) document.activeElement.blur();
@@ -411,9 +464,9 @@ export default function Canvas({
         if (isGroupDrag) {
           const finalDx = clamped.x - bboxX;
           const finalDy = clamped.y - bboxY;
-          onUpdateWidgets(groupMembers.map(w => ({ ...w, x: w.x + finalDx, y: w.y + finalDy })));
+          onUpdateWidgets(groupMembers.map(w => adoptIntoContainer({ ...w, x: w.x + finalDx, y: w.y + finalDy })));
         } else {
-          onUpdateWidget({ ...target, ...clamped });
+          onUpdateWidget(adoptIntoContainer({ ...target, ...clamped }));
         }
       } else if (!moved) {
         if (inTabHeader) {
@@ -524,7 +577,11 @@ export default function Canvas({
             x={ctxMenu.x}
             y={ctxMenu.y}
             scale={scale}
-            onAdd={(type) => { onAddWidget(type, ctxMenu.x, ctxMenu.y); setCtxMenu(null); }}
+            onAdd={(type) => {
+              const target = resolveAddTarget(ctxMenu.x, ctxMenu.y);
+              onAddWidget(type, target.x, target.y, target.parentId);
+              setCtxMenu(null);
+            }}
             onClose={() => setCtxMenu(null)}
           />
         )}
@@ -583,6 +640,7 @@ function EditWidget({ widget, scale, selectedId, selectedIds, snapPx, draggingPo
   // mirroring how SpecScreen picks a default active tab at runtime.
   const tabChildren = isTabs ? children.filter((c) => c.type === "tab" && isConditionallyVisible(c, bindingsSchema)) : [];
   const tabHeaderHeight = isTabs ? parseInt(widget.props.tab_height ?? "20", 10) : 0;
+  const side = isTabs ? tabSide(widget) : "top";
   const { activeTabIds, setActiveTab } = useContext(ActiveTabCtx);
   const storedTabId = isTabs ? (activeTabIds.get(widget.id) ?? null) : null;
   const activeTabId = storedTabId && tabChildren.some((t) => t.id === storedTabId)
@@ -726,7 +784,7 @@ function EditWidget({ widget, scale, selectedId, selectedIds, snapPx, draggingPo
       }}
       minWidth={
         widget.type === "scrollbar" && (widget.props.axis ?? "y") === "y" ? SCROLLBAR_FIXED_PX :
-        isTabs ? tabsMinWidth(children.filter(c => c.type === "tab")) :
+        isTabs ? (side === "top" ? tabsMinWidth(children.filter(c => c.type === "tab")) : tabHeaderHeight + 16) :
         undefined
       }
       maxWidth={widget.type === "scrollbar" && (widget.props.axis ?? "y") === "y" ? SCROLLBAR_FIXED_PX : undefined}
@@ -853,7 +911,7 @@ function EditWidget({ widget, scale, selectedId, selectedIds, snapPx, draggingPo
         altResizeRef.current = null;
         if (x === widget.x && y === widget.y && w === widget.w && h === widget.h) return;
         // For tabs: commit container + reflowed tab children in one atomic update
-        if (isTabs) {
+        if (isTabs && side === "top") {
           const tabGap = widget.parentId ? NESTED_TAB_GAP : TAB_GAP;
           const tabKids = children.filter(c => c.type === "tab");
           const { allDefault, tabs: rawTabs } = computeTabLayout(tabKids, w, tabGap);
@@ -956,7 +1014,36 @@ function EditWidget({ widget, scale, selectedId, selectedIds, snapPx, draggingPo
           ))}
         </div>
       )}
-      {isTabs && !widget.parentId && (
+      {isTabs && side !== "top" && (
+        <TabsSideEditHeader
+          widget={widget}
+          side={side}
+          tabChildren={tabChildren}
+          tex={tex}
+          activeTabId={activeTabId}
+          inlineEdit={inlineEdit}
+          setInlineEdit={setInlineEdit}
+          inlineInputRef={inlineInputRef}
+          commitInlineEdit={commitInlineEdit}
+          setPreviewTabId={setPreviewTabId}
+          tabHeaderHeight={tabHeaderHeight}
+          scale={scale}
+          selectedId={selectedId}
+          selectedIds={selectedIds}
+          selectionChangedRef={selectionChangedRef}
+          snapPx={snapPx}
+          draggingPos={draggingPos}
+          draggingSize={draggingSize}
+          setDraggingSize={setDraggingSize}
+          dragGuides={dragGuides}
+          groupDrag={groupDrag}
+          onResizeCommit={onResizeCommit}
+          childMap={childMap}
+          activeTabChildren={activeTabChildren}
+          EditWidget={EditWidget}
+        />
+      )}
+      {isTabs && side === "top" && !widget.parentId && (
         <TabsTopEditHeader
           widget={widget}
           tabChildren={tabChildren}
@@ -987,7 +1074,7 @@ function EditWidget({ widget, scale, selectedId, selectedIds, snapPx, draggingPo
           EditWidget={EditWidget}
         />
       )}
-      {isTabs && !!widget.parentId && (
+      {isTabs && side === "top" && !!widget.parentId && (
         <TabsNestedEditHeader
           widget={widget}
           tabChildren={tabChildren}
@@ -1082,6 +1169,7 @@ function TryWidget({ widget, scale, childMap, zBase, allWidgets }: {
   const bindingsSchema = useContext(BindingsCtx);
   const tabChildren = isTabs ? children.filter((c) => c.type === "tab" && !c.hidden && isConditionallyVisible(c, bindingsSchema)) : [];
   const tabHeaderHeight = isTabs ? parseInt(widget.props.tab_height ?? "20", 10) : 0;
+  const side = isTabs ? tabSide(widget) : "top";
   const { activeTabIds, setActiveTab } = useContext(ActiveTabCtx);
   const storedTryTabId = isTabs ? (activeTabIds.get(widget.id) ?? null) : null;
   const resolvedTabId = storedTryTabId && tabChildren.some((t) => t.id === storedTryTabId)
@@ -1160,7 +1248,23 @@ function TryWidget({ widget, scale, childMap, zBase, allWidgets }: {
           ))}
         </div>
       )}
-      {isTabs && !widget.parentId && (
+      {isTabs && side !== "top" && (
+        <TabsSideTryHeader
+          widget={widget}
+          side={side}
+          tabChildren={tabChildren}
+          tex={tex}
+          resolvedTabId={resolvedTabId}
+          setActiveTab={setActiveTab}
+          tabHeaderHeight={tabHeaderHeight}
+          scale={scale}
+          childMap={childMap}
+          activeTabChildren={activeTabChildren}
+          allWidgets={allWidgets}
+          TryWidgetRoot={TryWidgetRoot}
+        />
+      )}
+      {isTabs && side === "top" && !widget.parentId && (
         <TabsTopTryHeader
           widget={widget}
           tabChildren={tabChildren}
@@ -1175,7 +1279,7 @@ function TryWidget({ widget, scale, childMap, zBase, allWidgets }: {
           TryWidgetRoot={TryWidgetRoot}
         />
       )}
-      {isTabs && !!widget.parentId && (
+      {isTabs && side === "top" && !!widget.parentId && (
         <TabsNestedTryHeader
           widget={widget}
           tabChildren={tabChildren}

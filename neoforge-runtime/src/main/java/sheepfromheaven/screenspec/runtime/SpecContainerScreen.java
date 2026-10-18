@@ -308,7 +308,9 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
             // edge tucks behind it) — vanilla creative-inventory layering. The active tab's sprite
             // is drawn by its TabButtonWidget, on top of the panel.
             builder().forEachTab(w, (tab, pos, active, x, y, tw, th) -> {
-                if (!active) renderer.renderTab(new McDrawContext(graphics), false, pos, w.parentId != null, x, y, tw, th + SpecWidgetBuilder.TAB_OVERLAP);
+                if (active) return;
+                int[] b = builder().inactiveTabSpriteBounds(w, x, y, tw, th);
+                renderer.renderTab(new McDrawContext(graphics), false, pos, SpecWidgetBuilder.tabSide(w), w.parentId != null, b[0], b[1], b[2], b[3]);
             });
             renderTabBody(graphics, w);
         }
@@ -331,11 +333,10 @@ public class SpecContainerScreen<T extends AbstractContainerMenu> extends Abstra
         }
     }
 
-    /** Draws the raised-panel bevel for the body area below a {@code tabs} widget's header row. */
+    /** Draws the raised-panel bevel for the body area next to a {@code tabs} widget's tab strip. */
     protected void renderTabBody(GuiGraphicsExtractor graphics, WidgetSpec tabsWidget) {
-        int[] origin = builder().originOf(tabsWidget);
-        int tabHeight = tabsWidget.propInt("tab_height", 20);
-        renderer.renderVanillaPanel(new McDrawContext(graphics), origin[0], origin[1] + tabHeight, tabsWidget.w, tabsWidget.h - tabHeight);
+        int[] body = builder().tabBodyRect(tabsWidget);
+        renderer.renderVanillaPanel(new McDrawContext(graphics), body[0], body[1], body[2], body[3]);
     }
 
     /**

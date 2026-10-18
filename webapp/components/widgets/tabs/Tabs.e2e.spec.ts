@@ -76,3 +76,49 @@ test("inactive tab stays visible (not covered by the content panel)", async ({ p
   await expect(page.getByText("First", { exact: true })).toBeVisible();
   await expect(page.getByText("Second", { exact: true })).toBeVisible();
 });
+
+test("right-click 'Add widget' inside a tab pane adds the widget to the active tab only", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, screenWithTabs());
+  await openEditor(page);
+
+  await clickAt(page, page.getByText("Second", { exact: true }));
+
+  // Right-click inside the content pane (below the 20px tab header).
+  const tabsBox = await page.locator('[data-widget-id="tabs_1"]').first().boundingBox();
+  if (!tabsBox) throw new Error("tabs_1 not found");
+  await page.mouse.click(tabsBox.x + tabsBox.width / 2, tabsBox.y + tabsBox.height * 0.75, { button: "right" });
+  await page.getByRole("menuitem", { name: "Button", exact: true }).click();
+
+  const added = page.locator('[data-widget-id="button_1"]');
+  await expect(added).toHaveCount(1);
+
+  // It belongs to "Second" — switching to "First" must show an empty pane.
+  await clickAt(page, page.getByText("First", { exact: true }));
+  await expect(added).toHaveCount(0);
+  await clickAt(page, page.getByText("Second", { exact: true }));
+  await expect(added).toHaveCount(1);
+});
+
+test("dragging a root widget onto a tab pane moves it into the active tab", async ({ page }) => {
+  const screen = screenWithTabs();
+  // A root-level widget sitting over the pane (as older projects have it) — shows on every tab.
+  screen.widgets.push({ id: "floating_label", type: "label", x: 20, y: 40, w: 40, h: 12, text: "Floating", icon: null, props: {} });
+  await seedTextures(page);
+  await seedProject(page, screen);
+  await openEditor(page);
+
+  const label = page.locator('[data-widget-id="floating_label"]');
+  const box = await label.boundingBox();
+  if (!box) throw new Error("floating_label not found");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 20, box.y + box.height / 2 + 20, { steps: 5 });
+  await page.mouse.up();
+
+  // Now it belongs to "First": hidden on "Second", back on "First".
+  await clickAt(page, page.getByText("Second", { exact: true }));
+  await expect(label).toHaveCount(0);
+  await clickAt(page, page.getByText("First", { exact: true }));
+  await expect(label).toHaveCount(1);
+});

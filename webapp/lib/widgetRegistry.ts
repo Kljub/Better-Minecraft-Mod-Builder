@@ -47,7 +47,8 @@ const WIDGET_REGISTRY: WidgetDef[] = [
       props: { tab_height: "20" },
     },
     propSchema: [
-      { key: "tab_height", label: "Tab Height", type: "number", defaultValue: "20" },
+      { key: "tab_position", label: "Tab Position", type: "select", options: ["top", "left", "right"], defaultValue: "top" },
+      { key: "tab_height", label: "Tab Size", type: "number", defaultValue: "20" },
     ],
   },
   {

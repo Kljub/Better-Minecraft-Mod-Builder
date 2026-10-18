@@ -7,8 +7,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
     <NextThemesProvider
       attribute="class"
-      defaultTheme="system"
-      enableSystem
+      // MCreator-style UI is dark-only (palette in globals.css).
+      defaultTheme="dark"
+      forcedTheme="dark"
+      enableSystem={false}
       disableTransitionOnChange
     >
       <TooltipProvider>{children}</TooltipProvider>

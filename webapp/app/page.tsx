@@ -30,6 +30,9 @@ interface HistoryEntry {
   biomes: BiomeSpec[];
   dimensions: DimensionSpec[];
   armors: ArmorSpec[];
+  /** generic elements (lib/elements) — normalized by the editor on load */
+  elements?: unknown;
+  mcVersion?: unknown;
   activeIdx: number;
   activeDocType:
     | "screen" | "item" | "block" | "attribute" | "effect" | "potion" | "texture"
@@ -169,6 +172,8 @@ export default function ProjectsPage() {
           effects?: EffectSpec[]; potions?: PotionSpec[];
           achievements?: AchievementSpec[]; recipes?: RecipeSpec[]; trades?: TradeSpec[]; lootEntries?: LootEntrySpec[];
           biomes?: BiomeSpec[]; dimensions?: DimensionSpec[]; armors?: ArmorSpec[];
+          elements?: unknown;
+          mcVersion?: unknown;
         }
         const migrated = migrateProjectJson(JSON.parse(ev.target?.result as string) as Record<string, unknown>) as unknown as ProjectFile;
         if (!Array.isArray(migrated.screens) || migrated.screens.length === 0) throw new Error("Invalid project file");
@@ -196,6 +201,8 @@ export default function ProjectsPage() {
           history: [{
             ...emptyHistoryEntry(screens), items, blocks, creativeTabs, customAttributes, effects, potions,
             achievements, recipes, trades, lootEntries, biomes, dimensions, armors,
+            elements: migrated.elements ?? {},
+            mcVersion: migrated.mcVersion,
           }],
           cursor: 0, gridSize: 4, showGrid: true, scale: 3,
         };

@@ -243,7 +243,9 @@ public class SpecScreen extends Screen implements ActionHost {
             if (!w.type.equals("tabs")) continue;
             // Inactive tabs render beneath the body panel (see SpecContainerScreen.renderBg).
             builder().forEachTab(w, (tab, pos, active, x, y, tw, th) -> {
-                if (!active) renderer.renderTab(new McDrawContext(graphics), false, pos, w.parentId != null, x, y, tw, th + SpecWidgetBuilder.TAB_OVERLAP);
+                if (active) return;
+                int[] b = builder().inactiveTabSpriteBounds(w, x, y, tw, th);
+                renderer.renderTab(new McDrawContext(graphics), false, pos, SpecWidgetBuilder.tabSide(w), w.parentId != null, b[0], b[1], b[2], b[3]);
             });
             renderTabBody(graphics, w);
         }
@@ -272,14 +274,13 @@ public class SpecScreen extends Screen implements ActionHost {
     }
 
     /**
-     * Draws the raised-panel bevel for the body area below a {@code tabs} widget's header row.
+     * Draws the raised-panel bevel for the body area next to a {@code tabs} widget's tab strip.
      * Active tab buttons extend 3px into this body (see {@link SpecWidgetBuilder}) to cover the
      * panel's top bevel edge, visually connecting them — same as the webapp canvas.
      */
     protected void renderTabBody(GuiGraphicsExtractor graphics, WidgetSpec tabsWidget) {
-        int[] origin = builder().originOf(tabsWidget);
-        int tabHeight = tabsWidget.propInt("tab_height", 20);
-        renderer.renderVanillaPanel(new McDrawContext(graphics), origin[0], origin[1] + tabHeight, tabsWidget.w, tabsWidget.h - tabHeight);
+        int[] body = builder().tabBodyRect(tabsWidget);
+        renderer.renderVanillaPanel(new McDrawContext(graphics), body[0], body[1], body[2], body[3]);
     }
 
     private void applyBindings() {

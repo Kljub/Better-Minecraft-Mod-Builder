@@ -52,13 +52,36 @@ export function findAxisAlignment(
   return best;
 }
 
+/** Which edge of a `tabs` widget its tab strip sits on ("tab_position" prop, default top). */
+export type TabSide = "top" | "left" | "right";
+
+export function tabSide(tabs: WidgetSpec): TabSide {
+  const p = tabs.props?.tab_position;
+  return p === "left" || p === "right" ? p : "top";
+}
+
+/**
+ * The content pane of a `tabs` widget, relative to the widget's own origin —
+ * the full widget minus the tab strip. `tab_height` is the strip's thickness:
+ * its height for top tabs, its width for side tabs. A `tab` child's content
+ * coordinates are relative to this rect's x/y.
+ */
+export function tabContentRect(tabs: WidgetSpec): { x: number; y: number; w: number; h: number } {
+  const strip = parseInt(tabs.props?.tab_height ?? "20", 10);
+  switch (tabSide(tabs)) {
+    case "left":  return { x: strip, y: 0, w: tabs.w - strip, h: tabs.h };
+    case "right": return { x: 0, y: 0, w: tabs.w - strip, h: tabs.h };
+    default:      return { x: 0, y: strip, w: tabs.w, h: tabs.h - strip };
+  }
+}
+
 /**
  * Returns the usable content area (width × height) of a `tabs` widget —
- * i.e. the full widget size minus the tab header strip.
+ * i.e. the full widget size minus the tab strip.
  */
 export function tabContentArea(tabs: WidgetSpec): { w: number; h: number } {
-  const tabH = parseInt(tabs.props?.tab_height ?? "20", 10);
-  return { w: tabs.w, h: tabs.h - tabH };
+  const { w, h } = tabContentRect(tabs);
+  return { w, h };
 }
 
 /**

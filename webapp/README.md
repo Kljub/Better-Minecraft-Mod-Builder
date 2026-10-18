@@ -20,6 +20,19 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Item Skin Generator
+
+The "Item Skin Generator" rail entry makes 16×16 item textures (from text, a base texture or as a
+material set), seamless 16×16 block textures and 64×64 player skins with a 3D preview. Results go into
+Resources and can be applied straight to an item or block. Models and licences:
+`tools/skin-generator/README.md`. `app/api/skin/generate` runs them on one of two backends, picked in the
+tab (block textures and player skins are local only):
+
+- **Local GPU** — `tools/skin-generator/server.py` on this machine, started/stopped from the tab
+  (dev server only). One-time setup: see `tools/skin-generator/README.md`.
+- **HF Space** — the public demo Space on shared ZeroGPU; anonymous callers run out of quota after a
+  handful of generations. `HF_TOKEN=hf_...` raises it, `SKIN_GENERATOR_SPACE_URL` points at a duplicate.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
