@@ -474,9 +474,12 @@ export interface ArmorSpec {
   iconChestplate: string;
   iconLeggings: string;
   iconBoots: string;
-  /** 3D body-layer pack texture key (equipment asset) — applied to both the "humanoid" layer
-   * (helmet/chestplate/boots) and "humanoid_leggings" layer (leggings) */
+  /** 3D body-layer pack texture key (equipment asset) — the "humanoid" layer (helmet/chestplate/
+   * boots), and also the "humanoid_leggings" layer unless equipmentLeggingsTexture is set */
   equipmentTexture: string;
+  /** optional separate "humanoid_leggings" layer texture (vanilla's layer_2: belt + legs); when
+   * empty the leggings reuse equipmentTexture */
+  equipmentLeggingsTexture?: string;
   /** vanilla's per-material "unit" durability, multiplied per slot internally by the game
    * (iron=15, diamond=33, netherite=37, gold=25, leather=5 — for reference) */
   durability: number;
@@ -492,5 +495,8 @@ export interface ArmorSpec {
   /** a CreativeTabKey, or a project-defined CreativeTabSpec's id */
   creativeTab: string;
   rarity: "common" | "uncommon" | "rare" | "epic";
+  /** optional custom 3D model (ArmorModelAPI bone convention, see lib/model3d/armorModel.ts) —
+   * replaces the flat vanilla armor layer; exported as geo/<id>.geo.json + the runtime's `customModel` */
+  model?: import("./model3d/types").EntityModel | null;
   appVersion?: string;
 }

@@ -19,11 +19,12 @@ interface Props {
   onOpenTextureEditor: (target: TexTarget) => void;
 }
 
-export type TexTarget = "iconHelmet" | "iconChestplate" | "iconLeggings" | "iconBoots" | "equipmentTexture";
+export type TexTarget = "iconHelmet" | "iconChestplate" | "iconLeggings" | "iconBoots" | "equipmentTexture" | "equipmentLeggingsTexture";
 
 const TEX_LABELS: Record<TexTarget, string> = {
   iconHelmet: "Helmet icon", iconChestplate: "Chestplate icon", iconLeggings: "Leggings icon", iconBoots: "Boots icon",
   equipmentTexture: "Body texture (3D)",
+  equipmentLeggingsTexture: "Leggings layer (optional)",
 };
 
 /** Property form for the currently selected Armor Set — 4 pieces (helmet/chestplate/leggings/
@@ -47,7 +48,7 @@ export default function ArmorPropertyPanel({ armor, items, creativeTabs, modId, 
   const texField = (target: TexTarget) => (
     <Field label={TEX_LABELS[target]}>
       <div className="flex flex-col gap-1">
-        <TextureField value={armor[target]} packTextures={packTextures} onPick={() => setTexPickerFor(target)} />
+        <TextureField value={armor[target] ?? ""} packTextures={packTextures} onPick={() => setTexPickerFor(target)} />
         <button
           type="button"
           onClick={() => onOpenTextureEditor(target)}
@@ -78,11 +79,12 @@ export default function ArmorPropertyPanel({ armor, items, creativeTabs, modId, 
 
       <div className="col-span-2 font-semibold text-muted-foreground mt-1">Body Texture (worn, 3D)</div>
       <div className="col-span-2">{texField("equipmentTexture")}</div>
+      <div className="col-span-2">{texField("equipmentLeggingsTexture")}</div>
 
       <TexturePickerModal
         open={texPickerFor !== null}
         packTextures={packTextures}
-        current={texPickerFor ? armor[texPickerFor] : ""}
+        current={texPickerFor ? armor[texPickerFor] ?? "" : ""}
         onSelect={(k) => { if (texPickerFor) onUpdate({ [texPickerFor]: k }); setTexPickerFor(null); }}
         onClose={() => setTexPickerFor(null)}
         onUpload={uploadCustomTexture}

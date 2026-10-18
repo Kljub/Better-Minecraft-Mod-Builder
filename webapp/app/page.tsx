@@ -1,5 +1,6 @@
 "use client";
 
+import { cloudSaveProjects, cloudDeleteProject } from "@/lib/cloud/sync";
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import WelcomeScreen from "@/components/WelcomeScreen";
@@ -32,6 +33,8 @@ interface HistoryEntry {
   armors: ArmorSpec[];
   /** generic elements (lib/elements) — normalized by the editor on load */
   elements?: unknown;
+  /** element folder names per kind — normalized by the editor on load */
+  elementFolders?: unknown;
   mcVersion?: unknown;
   activeIdx: number;
   activeDocType:
@@ -115,6 +118,7 @@ function loadProjects(): StoredProject[] {
 
 function saveProjects(projects: StoredProject[]): void {
   try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch { /* quota */ }
+  cloudSaveProjects(projects);
 }
 
 function toSummaries(projects: StoredProject[]): ProjectSummary[] {
@@ -155,6 +159,7 @@ export default function ProjectsPage() {
   }, [router]);
 
   const handleDeleteProject = useCallback((key: string) => {
+    cloudDeleteProject(key);
     setProjects((prev) => {
       const updated = prev.filter((p) => p.key !== key);
       saveProjects(updated);
@@ -173,6 +178,7 @@ export default function ProjectsPage() {
           achievements?: AchievementSpec[]; recipes?: RecipeSpec[]; trades?: TradeSpec[]; lootEntries?: LootEntrySpec[];
           biomes?: BiomeSpec[]; dimensions?: DimensionSpec[]; armors?: ArmorSpec[];
           elements?: unknown;
+          elementFolders?: unknown;
           mcVersion?: unknown;
         }
         const migrated = migrateProjectJson(JSON.parse(ev.target?.result as string) as Record<string, unknown>) as unknown as ProjectFile;
@@ -202,6 +208,7 @@ export default function ProjectsPage() {
             ...emptyHistoryEntry(screens), items, blocks, creativeTabs, customAttributes, effects, potions,
             achievements, recipes, trades, lootEntries, biomes, dimensions, armors,
             elements: migrated.elements ?? {},
+            elementFolders: migrated.elementFolders ?? {},
             mcVersion: migrated.mcVersion,
           }],
           cursor: 0, gridSize: 4, showGrid: true, scale: 3,

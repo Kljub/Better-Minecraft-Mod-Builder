@@ -75,6 +75,7 @@ export async function startAgentRun(opts: {
         if (ev.type === "start") set({ port: ev.port ?? null });
         else if (ev.type === "tool") push({ kind: "tool", text: ev.name ?? "tool", detail: ev.detail });
         else if (ev.type === "text" && ev.text) push({ kind: "text", text: ev.text });
+        else if (ev.type === "info" && ev.text) push({ kind: "info", text: ev.text });
         else if (ev.type === "done") {
           // claude repeats its last message as the final result — don't show it twice
           const last = state.log.at(-1);

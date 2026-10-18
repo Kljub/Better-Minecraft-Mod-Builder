@@ -44,7 +44,9 @@ export function useMcpBridge(enabled: boolean, port: number, execute: (cmd: Brid
     if (!enabled) return;
     let stopped = false;
     const ctrl = new AbortController();
-    const base = `http://127.0.0.1:${port}`;
+    // Through the dev server: the MCP server listens on the server machine's loopback, which a
+    // browser on another computer can't reach directly.
+    const base = `/api/ai/bridge/${port}`;
     (async () => {
       let failures = 0;
       let reachable = false;
@@ -58,14 +60,18 @@ export function useMcpBridge(enabled: boolean, port: number, execute: (cmd: Brid
             setStatus("connected");
           }
           const res = await fetch(`${base}/poll?info=${encodeURIComponent(JSON.stringify(getInfo.current()))}`, { signal: ctrl.signal, cache: "no-store" });
+          // A dead MCP server answers instantly with the proxy's 502 — that must back off and
+          // re-ping, not be run as a command (that spun this loop and flickered "· undefined").
+          if (!res.ok) throw new Error(`poll failed (${res.status})`);
           failures = 0;
           setStatus("connected");
           if (res.status === 204) continue;
-          const cmd = (await res.json()) as BridgeCommand;
+          const cmd = (await res.json()) as Partial<BridgeCommand>;
+          if (typeof cmd.id !== "string" || typeof cmd.tool !== "string") throw new Error("malformed bridge command");
           setStatus("busy");
           setLastTool(cmd.tool);
           let body: Record<string, unknown>;
-          try { body = { id: cmd.id, ok: true, result: await exec.current(cmd) }; }
+          try { body = { id: cmd.id, ok: true, result: await exec.current({ id: cmd.id, tool: cmd.tool, args: cmd.args ?? {} }) }; }
           catch (err) { body = { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) }; }
           await fetch(`${base}/result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: ctrl.signal });
           setStatus("connected");

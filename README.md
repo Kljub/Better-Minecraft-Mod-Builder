@@ -47,6 +47,52 @@ npm run dev        # http://localhost:3000
 npm run mcp        # optional: MCP server for AI clients (bridge on 127.0.0.1:8790)
 ```
 
+## Accounts & database (optional)
+
+Without a database the designer keeps projects in the browser (localStorage / IndexedDB), as before. With MySQL configured, it has **user accounts**:
+- Everyone logs in with a username and password. Passwords are hashed with scrypt, and sessions use httpOnly cookies.
+- Projects, custom textures, structure files and resource folders are stored per account, so they're the same in every browser and on every PC.
+- On the first login, projects that only exist in that browser are moved into the account automatically.
+- **Linked AI accounts** (Settings → AI → Accounts): several Claude (token from `claude setup-token`, or an API key) and Codex logins (device login or API key) per user.
+  - Their tokens are stored encrypted (AES-256-GCM).
+  - AI runs use the first account in the queue with free quota and switch to the next one when an account hits its limit.
+  - Quota comes from each run (Claude's 5 h / 7 day windows, Codex's rate limits), or from **Check**.
+
+Setup: create a MySQL 8+ database and user, then put the connection into `webapp/.env.local` (never commit it):
+
+```bash
+MMB_DB_HOST=127.0.0.1
+MMB_DB_PORT=3306
+MMB_DB_NAME=mc_mod_builder
+MMB_DB_USER=mc_mod_builder
+MMB_DB_PASSWORD=...
+# encrypts linked AI account tokens — generate once with: openssl rand -base64 32
+MMB_SECRET_KEY=...
+```
+
+### Training data: `mmb_models`
+
+With accounts on, every 3D model in every saved project is also kept in its own table. That covers Entity Models and custom armor models. It's meant as a dataset for training your own model later:
+
+| Column | Content |
+|---|---|
+| `kind`, `name`, `element_id`, `project_key`, `mod_id`, `mc_version` | what it is and where it comes from |
+| `prompt`, `ai_provider`, `ai_run_id` | the request that built it, if the Entity Model Generator made it (full run incl. every tool call in `mmb_ai_runs`) |
+| `geo_json`, `animations_json` | Bedrock / GeckoLib geometry and animations |
+| `model_json`, `settings_json` | the editor's model and the mob settings (stats, drops, …) |
+| `texture_key`, `texture_width/height` | the texture (bytes in `mmb_files`) |
+| `bone_count`, `cube_count`, `animation_count` | quick stats for filtering |
+| `created_at`, `updated_at`, `deleted_at` | rows are refreshed on change and kept when a model is removed |
+
+Export as JSON Lines, one model per line with the texture PNG as base64:
+- **Your own models:** `GET /api/dataset`.
+- **All users' models:** `npm run dataset:export -- out.jsonl [--ai-only] [--deleted]` (for the server owner).
+- **Projects saved before the table existed:** `npm run dataset:backfill` adds their models.
+
+If other people use your server, tell them their models are collected.
+
+The tables (`mmb_*`) are created on first use. Keep `MMB_SECRET_KEY` safe: without it, the stored tokens can't be decrypted, and you'd have to re-link the accounts. The AI routes (which run the Claude/Codex CLIs) still only work on the local dev server.
+
 ## AI setup (optional)
 
 The designer works without any AI. Each AI feature has its own setup below. They are all independent of each other.
@@ -59,6 +105,7 @@ The **Item Skin Generator** tab generates the following:
 |---|---|---|
 | 16×16 item textures | [yuuki14202028/minecraft-item-16px](https://huggingface.co/yuuki14202028/minecraft-item-16px) (SD 1.5) | ~2 GB, automatic |
 | 16×16 block textures | [SD 1.5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) + [Minecraft Block Texture LoRA](https://civitai.com/models/55824) | ~2 GB + LoRA, automatic |
+| 1.19-style block textures | SD 1.5 + [Minecraft 1.19 Block+Item LoRA](https://civitai.com/models/60379) | +36 MB, automatic |
 | 64×64 player skins | [monadical-labs/minecraft-skin-generator-sdxl](https://huggingface.co/monadical-labs/minecraft-skin-generator-sdxl) (SDXL) | ~7 GB, automatic |
 
 The tab has two backends:
@@ -209,7 +256,7 @@ AI models and tools:
 - [Ollama](https://ollama.com/) (for example `qwen3`) — optional local LLM backend.
 - [yuuki14202028/minecraft-item-16px](https://huggingface.co/yuuki14202028/minecraft-item-16px) — a Stable Diffusion 1.5 fine-tune for 16×16 item textures.
 - [monadical-labs/minecraft-skin-generator-sdxl](https://huggingface.co/monadical-labs/minecraft-skin-generator-sdxl) — an SDXL model for player skins.
-- [stable-diffusion-v1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) plus the [Minecraft Block Texture 1.12 LoRA](https://civitai.com/models/55824) — block textures.
+- [stable-diffusion-v1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) plus the [Minecraft Block Texture 1.12 LoRA](https://civitai.com/models/55824) and the [Minecraft 1.19 Block+Item LoRA](https://civitai.com/models/60379) (both by pymess508) — block textures.
 - [diffusers](https://github.com/huggingface/diffusers), [transformers](https://github.com/huggingface/transformers), [PyTorch](https://pytorch.org/), [Gradio](https://github.com/gradio-app/gradio) — the local skin-generator backend.
 
 Libraries:
@@ -217,6 +264,7 @@ Libraries:
 - [three.js](https://github.com/mrdoob/three.js) — 3D viewport (WebGL, GPU-accelerated).
 - [Model Context Protocol TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) and [zod](https://github.com/colinhacks/zod) — the MCP server.
 - [dnd-kit](https://github.com/clauderic/dnd-kit), [react-rnd](https://github.com/bokuweb/react-rnd), [JSZip](https://github.com/Stuk/jszip), [sonner](https://github.com/emilkowalski/sonner).
+- [mysql2](https://github.com/sidorares/node-mysql2) — MySQL driver for accounts and cloud storage.
 - [Vitest](https://github.com/vitest-dev/vitest) and [Playwright](https://github.com/microsoft/playwright) — tests.
 - [NeoForge](https://neoforged.net/) — the mod loader for the runtime library.
 

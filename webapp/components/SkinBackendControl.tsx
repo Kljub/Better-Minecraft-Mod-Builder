@@ -27,9 +27,11 @@ export function loadSkinBackend(): SkinBackend {
  * Header controls of the Item Skin Generator: pick where the model runs, and for the local
  * backend (tools/skin-generator/server.py) see its state, start/stop it and read its log.
  */
-export default function SkinBackendControl({ backend, onBackend }: {
+export default function SkinBackendControl({ backend, onBackend, localOnly = false }: {
   backend: SkinBackend;
   onBackend: (b: SkinBackend) => void;
+  /** only the local server can do this tab's work — no backend switch, just its controls */
+  localOnly?: boolean;
 }) {
   const [status, setStatus] = useState<LocalStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -121,10 +123,10 @@ export default function SkinBackendControl({ backend, onBackend }: {
             </Button>
           </>
         )}
-        <div className="flex gap-0.5 rounded-sm border p-0.5">
+        {!localOnly && <div className="flex gap-0.5 rounded-sm border p-0.5">
           {seg("local", <Cpu className="h-3 w-3" />, "Local GPU", "Run the model on this machine (tools/skin-generator)")}
           {seg("space", <Cloud className="h-3 w-3" />, "HF Space", "Public Hugging Face demo Space — shared GPU quota")}
-        </div>
+        </div>}
       </div>
       {backend === "local" && showLog && (
         <pre className="absolute inset-x-0 top-10 z-20 max-h-60 overflow-auto border-b bg-[var(--rail)] p-2 font-mono text-[10px] leading-tight text-muted-foreground shadow-md">

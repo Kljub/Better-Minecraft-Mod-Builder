@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { TextureProvider } from "@/lib/TextureContext";
+import AuthGate from "@/components/AuthGate";
 import { PostHogProvider } from "@/components/PostHogProvider";
 import { Toaster } from "@/components/ui/sonner";
 import { NextDevToolsVisibility } from "@/lib/devToolsSetting";
@@ -41,7 +42,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <ThemeProvider>
           <PostHogProvider>
-            <TextureProvider>{children}</TextureProvider>
+            <AuthGate><TextureProvider>{children}</TextureProvider></AuthGate>
             <Toaster />
             <NextDevToolsVisibility />
           </PostHogProvider>

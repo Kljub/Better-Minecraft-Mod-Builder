@@ -1,5 +1,6 @@
 import { guardRequest, runStructured, type CliProvider } from "../cli";
 import { buildPrompt, buildTask } from "../tasks";
+import { withLinkedAccount } from "../linked";
 
 export async function POST(request: Request) {
   const refused = guardRequest(request);
@@ -20,7 +21,11 @@ export async function POST(request: Request) {
   if (!task) return Response.json({ error: "Unknown task" }, { status: 400 });
 
   try {
-    const raw = await runStructured(provider as CliProvider, model, task.system, buildPrompt(String(body.task), prompt, body.context), task.schema);
+    const fullPrompt = buildPrompt(String(body.task), prompt, body.context);
+    const raw = provider === "ollama"
+      ? await runStructured(provider, model, task.system, fullPrompt, task.schema)
+      : await withLinkedAccount(request, provider, (account, onQuota) =>
+        runStructured(provider as CliProvider, model, task.system, fullPrompt, task.schema, account, onQuota));
     return Response.json(task.validate(raw));
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });

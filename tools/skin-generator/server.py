@@ -8,9 +8,10 @@ the same way:
   /generate              (prompt, count, steps, guidance, seed)
   /generate_from_sketch  (sketch, prompt, count, strength, steps, guidance, seed)
   /generate_tier_set     (sketch, materials, noun, strength, steps, guidance, seed)
-  /generate_block        (prompt, count, steps, guidance, seed, engine, tileable)  -- see block_texture.py
+  /generate_block        (prompt, count, steps, guidance, seed, engine, tileable, size)  -- see block_texture.py
   /generate_player_skin  (prompt, count, steps, guidance, seed)   -- see player_skin.py
-(the last two exist only locally, not on the Space)
+  /generate_armor        (material, count, steps, guidance, seed)  -- see armor.py
+(the last three exist only locally, not on the Space)
   /status                () -> {"device", "model", "dtype"}
 
 Each returns (previews, files); the files are the finished 16x16 RGBA PNGs (64x64 skins for
@@ -32,6 +33,7 @@ import torch
 from PIL import Image
 from diffusers import DPMSolverMultistepScheduler, StableDiffusionImg2ImgPipeline, StableDiffusionPipeline
 
+import armor
 import block_texture
 import player_skin
 
@@ -166,12 +168,15 @@ def save_files(images, prompt, fallback):
     return [im.resize((256, 256), Image.Resampling.NEAREST) for im in images], files
 
 
-def generate_block(prompt, count, steps, guidance, seed, engine, tileable):
+def generate_block(prompt, count, steps, guidance, seed, engine, tileable, size=16):
     if not prompt.strip():
         raise gr.Error("Enter a prompt. For example: mossy stone bricks")
-    if engine not in ("item", "lora"):
+    if engine not in ("item", "lora", "lora119", "sd15"):
         raise gr.Error("Unknown engine")
-    tiles = block_texture.generate(pipe, engine, prompt, count, steps, guidance, seed, bool(tileable), DEVICE, DTYPE)
+    try:
+        tiles = block_texture.generate(pipe, engine, prompt, count, steps, guidance, seed, bool(tileable), DEVICE, DTYPE, int(size))
+    except ValueError as e:
+        raise gr.Error(str(e))
     return save_files(tiles, prompt, "block")
 
 
@@ -179,6 +184,33 @@ def generate_player_skin(prompt, count, steps, guidance, seed):
     if not prompt.strip():
         raise gr.Error("Describe the character. For example: a knight in golden armor")
     return save_files(player_skin.generate(prompt, count, steps, guidance, seed, DEVICE, DTYPE), prompt, "skin")
+
+
+@torch.inference_mode()
+def item_icons(prompts, seed):
+    """16x16 icons from the item model, one per prompt, all from the same starting noise."""
+    gens = None if int(seed) < 0 else [torch.Generator(device="cpu").manual_seed(int(seed)) for _ in prompts]
+    images = pipe(prompts, negative_prompt=[""] * len(prompts), num_inference_steps=30, guidance_scale=9.0,
+                  height=256, width=256, generator=gens).images
+    return [to_tile(im) for im in images]
+
+
+def generate_armor(material, count, steps, guidance, seed):
+    """Per set: layer1, layer2 (64x32 worn armor) + helmet/chestplate/leggings/boots icons, in that
+    order, named <material>_<set>_<part>.png."""
+    if not material.strip():
+        raise gr.Error("Enter a material. For example: ruby")
+    sets = armor.generate(item_icons, material.strip(), count, steps, guidance, seed, DEVICE, DTYPE)
+    stem = "".join(ch if ch.isalnum() else "_" for ch in material.strip())[:40] or "armor"
+    tmp = Path(tempfile.mkdtemp())
+    previews, files = [], []
+    for i, parts in enumerate(sets):
+        for part in ("layer1", "layer2", *armor.PIECES):
+            path = tmp / f"{stem}_{i}_{part}.png"
+            parts[part].save(path)
+            files.append(str(path))
+        previews.append(parts["skin"].resize((256, 256), Image.Resampling.NEAREST))
+    return previews, files
 
 
 def status() -> dict:
@@ -229,17 +261,29 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
                     [t_gallery, t_files], api_name="generate_tier_set")
     with gr.Tab("Block"):
         b_prompt = gr.Textbox(label="Prompt", value="mossy stone bricks")
-        b_engine = gr.Radio(["item", "lora"], value="item", label="Engine")
+        b_engine = gr.Radio(["item", "lora", "lora119", "sd15"], value="item", label="Engine")
         b_tile = gr.Checkbox(value=True, label="Seamless")
+        b_size = gr.Dropdown([16, 32, 64, 128, 256], value=16, label="Size (item engine: 16 only)")
         b_count = gr.Slider(1, 8, value=4, step=1, label="Images")
         b_steps = gr.Slider(10, 50, value=30, step=1, label="Steps")
         b_guidance = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance")
         b_seed = gr.Number(value=0, precision=0, label="Seed")
         b_run = gr.Button("Generate", variant="primary")
         b_gallery = gr.Gallery(columns=4, height=300)
-        b_files = gr.Files(label="16x16 PNG")
-        b_run.click(generate_block, [b_prompt, b_count, b_steps, b_guidance, b_seed, b_engine, b_tile],
+        b_files = gr.Files(label="PNG")
+        b_run.click(generate_block, [b_prompt, b_count, b_steps, b_guidance, b_seed, b_engine, b_tile, b_size],
                     [b_gallery, b_files], api_name="generate_block")
+    with gr.Tab("Armor"):
+        a_material = gr.Textbox(label="Material", value="ruby")
+        a_count = gr.Slider(1, 4, value=1, step=1, label="Sets")
+        a_steps = gr.Slider(10, 60, value=40, step=1, label="Steps")
+        a_guidance = gr.Slider(1.0, 15.0, value=7.5, step=0.5, label="Guidance")
+        a_seed = gr.Number(value=0, precision=0, label="Seed")
+        a_run = gr.Button("Generate", variant="primary")
+        a_gallery = gr.Gallery(columns=4, height=300)
+        a_files = gr.Files(label="layers + icons")
+        a_run.click(generate_armor, [a_material, a_count, a_steps, a_guidance, a_seed], [a_gallery, a_files],
+                    api_name="generate_armor")
     with gr.Tab("Player skin"):
         p_prompt = gr.Textbox(label="Prompt", value="a knight in golden armor")
         p_count = gr.Slider(1, 4, value=2, step=1, label="Images")

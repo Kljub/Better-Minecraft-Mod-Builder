@@ -697,6 +697,10 @@ Per mob you get:
   (hunts players), `stationary`;
 - melee attacks dealing the chosen **damage type** (e.g. one from the Damage Types tab; unknown ids
   fall back to `minecraft:mob_attack`);
+- **drops**: death drops come from the loot table the webapp exports at
+  `data/<modid>/loot_table/entities/<id>.json` (the `EntityType`'s default loot table — count range,
+  chance, Looting bonus, "killed by player", cooked when burning); `hurtDrops` in the manifest are
+  rolled by the runtime each time the mob takes damage (per-hit chance, optionally players only);
 - a spawn egg in the Spawn Eggs tab, and spawn placement rules when "Spawns naturally" is on (the
   webapp also exports the matching `neoforge:add_spawns` biome modifier);
 - client: the model layer built from the exported parts, keyframe animations baked with vanilla's

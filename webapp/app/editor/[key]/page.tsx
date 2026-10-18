@@ -1,5 +1,7 @@
 "use client";
 
+import { CloudStatusChip } from "@/components/AuthGate";
+import { cloudSaveProjects } from "@/lib/cloud/sync";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { arrayMove } from "@dnd-kit/sortable";
@@ -8,6 +10,7 @@ import PropertyPanel from "@/components/PropertyPanel";
 import ItemBlockPropertyPanel from "@/components/ItemBlockPropertyPanel";
 import ItemBlockPreview from "@/components/ItemBlockPreview";
 import ArmorPropertyPanel, { type TexTarget } from "@/components/ArmorPropertyPanel";
+import ArmorWorkspace from "@/components/ArmorWorkspace";
 import ArmorPreview from "@/components/ArmorPreview";
 import CustomAttributePropertyPanel from "@/components/CustomAttributePropertyPanel";
 import CustomAttributePreview from "@/components/CustomAttributePreview";
@@ -29,17 +32,20 @@ import DimensionPropertyPanel from "@/components/DimensionPropertyPanel";
 import DimensionPreview from "@/components/DimensionPreview";
 import TextureEditorPanel from "@/components/TextureEditorPanel";
 import SettingsDialog from "@/components/SettingsDialog";
-import AppSidebar, { type ActiveDocType, type SectionKey, SECTION_ICONS, sectionOfDoc, sectionIcon, sectionLabel } from "@/components/Sidebar";
-import CategoryView, { type CategoryViewProps } from "@/components/CategoryView";
+import AppSidebar, { type ActiveDocType, type SectionKey, type ToolSection, SECTION_ICONS, isToolSection, sectionOfDoc, sectionIcon, sectionLabel } from "@/components/Sidebar";
+import CategoryView, { type CategoryViewProps, type CategoryFolders } from "@/components/CategoryView";
 import { LayersSection, TemplatesSection, AttributePresetsSection } from "@/components/EditorSidePanels";
 import WorkspaceOverview, { type WorkspaceSection } from "@/components/WorkspaceOverview";
 import ResourcesPanel from "@/components/ResourcesPanel";
 import ItemSkinGeneratorPanel from "@/components/ItemSkinGeneratorPanel";
+import BlockGeneratorPanel from "@/components/BlockGeneratorPanel";
+import ArmorGeneratorPanel from "@/components/ArmorGeneratorPanel";
 import ElementEditor, { ElementFilesPreview } from "@/components/ElementEditor";
 import ModelEditor from "@/components/model3d/ModelEditor";
 import { defaultEntitySettings } from "@/lib/elements/entitySettings";
 import { setBridgeEnabled, useBridgeEnabled, useMcpBridge } from "@/lib/ai/mcpBridge";
 import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
+import { forgetKey, renameAssignedKey } from "@/lib/resourceFolders";
 import EntityModelGeneratorPanel from "@/components/EntityModelGeneratorPanel";
 import { runTool, type EditorApi } from "@/lib/ai/editorTools";
 import type { EntityModel } from "@/lib/model3d/types";
@@ -111,7 +117,9 @@ function duplicateSpecId(baseId: string, existing: { id: string }[]): string {
 function buildExportedScreen(screen: ScreenSpec): ScreenSpec {
   const widgets = excludeFromExportedWidgets(screen.widgets);
   const container = buildContainerSpec(screen.widgets);
-  return { ...screen, widgets, ...(container ? { container } : {}), appVersion: APP_VERSION };
+  const { folder: _folder, ...rest } = screen as ScreenSpec & { folder?: string };
+  void _folder; // editor-only (category folders), not part of the runtime JSON
+  return { ...rest, widgets, ...(container ? { container } : {}), appVersion: APP_VERSION };
 }
 
 interface ProjectFile {
@@ -132,6 +140,8 @@ interface ProjectFile {
   dimensions: DimensionSpec[];
   /** generic MCreator-style elements (lib/elements), by kind */
   elements?: ElementsByKind;
+  /** folder names per element kind (category view organization; an element's own folder is spec.folder) */
+  elementFolders?: Record<string, string[]>;
   /** Minecraft version the project generates files for */
   mcVersion?: McVersion;
   appVersion: string;
@@ -158,6 +168,8 @@ interface HistoryEntry {
   dimensions: DimensionSpec[];
   /** generic MCreator-style elements (lib/elements), by kind */
   elements: ElementsByKind;
+  /** folder names per element kind, in display order — includes empty folders */
+  elementFolders?: Record<string, string[]>;
   /** which generic element is open when activeDocType is "element" */
   activeElement: { kind: string; idx: number } | null;
   /** Minecraft version the project generates files for (project setting, undoable like any edit) */
@@ -226,6 +238,7 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
     biomes: (Array.isArray(e.biomes) ? e.biomes : []) as BiomeSpec[],
     dimensions: (Array.isArray(e.dimensions) ? e.dimensions : []) as DimensionSpec[],
     elements: normalizeElements(e.elements),
+    elementFolders: normalizeElementFolders(e.elementFolders),
     activeElement: (e.activeElement as HistoryEntry["activeElement"]) ?? null,
     mcVersion: normalizeMcVersion(e.mcVersion),
     activeIdx: (e.activeIdx as number) ?? 0,
@@ -249,6 +262,22 @@ function migrateSession(raw: Record<string, unknown>): SavedSession {
 // Repairs a screen loaded from localStorage or an imported file: old/hand-edited/corrupted
 // records can have a missing or non-finite width/height (e.g. NaN), which crashes Canvas's
 // height style — fall back to the current default size rather than propagating that.
+/** Built-in categories with folders (lists stored directly on the history entry). */
+type FolderSection = "screens" | "items" | "blocks" | "armors" | "creativeTabs" | "customAttributes" | "effects" | "potions"
+  | "achievements" | "recipes" | "trades" | "lootEntries" | "biomes" | "dimensions";
+
+/** Repairs a loaded elementFolders record: kind -> unique, non-empty folder names. */
+function normalizeElementFolders(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [kind, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    const names = [...new Set(list.filter((n): n is string => typeof n === "string" && n.trim() !== "").map((n) => n.trim()))];
+    if (names.length) out[kind] = names;
+  }
+  return out;
+}
+
 function normalizeScreen(s: ScreenSpec): ScreenSpec {
   const width = Number.isFinite(s.width) && s.width > 0 ? s.width : 350;
   const height = Number.isFinite(s.height) && s.height > 0 ? s.height : 200;
@@ -316,6 +345,7 @@ function loadProjects(): StoredProject[] {
 
 function saveProjects(projects: StoredProject[]): void {
   try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch { /* quota */ }
+  cloudSaveProjects(projects);
 }
 
 
@@ -339,7 +369,7 @@ export default function EditorPage() {
   const router = useRouter();
   const projectKey = params.key;
 
-  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture, reload: reloadTextures } = useTextures();
+  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture, reload: reloadTextures } = useTextures();
   const [showTextureDebug, setShowTextureDebug] = useState(false);
   const [railSettingsOpen, setRailSettingsOpen] = useState(false);
   const [projectLoaded, setProjectLoaded] = useState(false);
@@ -400,9 +430,7 @@ export default function EditorPage() {
   const [mainView, setMainView] = useState<{ kind: "workspace" } | { kind: "section"; key: SectionKey } | null>(null);
   const activeMainView = mainView === null ? null
     : mainView.kind === "workspace" ? "workspace"
-    : mainView.key === "resources" ? "resources"
-    : mainView.key === "skinGenerator" ? "skinGenerator"
-    : mainView.key === "modelGenerator" ? "modelGenerator" : "category";
+    : isToolSection(mainView.key) ? mainView.key : "category";
   const showWorkspace = activeMainView === "workspace";
   const railActive = mainView === null ? sectionOfDoc(activeDocType, entry.activeElement?.kind)
     : mainView.kind === "workspace" ? "all" : mainView.key;
@@ -1821,6 +1849,7 @@ export default function EditorPage() {
         dimensions,
         armors,
         elements,
+        elementFolders: entry.elementFolders ?? {},
         mcVersion,
         appVersion: APP_VERSION,
       };
@@ -1835,7 +1864,7 @@ export default function EditorPage() {
     } catch (e) {
       alert(`Could not export project: ${e instanceof Error ? e.message : e}`);
     }
-  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements, mcVersion]);
+  }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements, entry.elementFolders, mcVersion]);
 
   const handleImportProjectClick = () => importProjectRef.current?.click();
   const handleImportProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1872,7 +1901,8 @@ export default function EditorPage() {
           effects: importedEffects, potions: importedPotions,
           achievements: importedAchievements, recipes: importedRecipes, trades: importedTrades, lootEntries: importedLootEntries,
           biomes: importedBiomes, dimensions: importedDimensions, armors: importedArmors,
-          elements: normalizeElements(migrated.elements), activeElement: null, mcVersion: normalizeMcVersion(migrated.mcVersion),
+          elements: normalizeElements(migrated.elements), elementFolders: normalizeElementFolders(migrated.elementFolders),
+          activeElement: null, mcVersion: normalizeMcVersion(migrated.mcVersion),
           activeIdx: 0, activeDocType: "screen", activeItemIdx: 0, activeBlockIdx: 0, activeAttributeIdx: 0,
           activeEffectIdx: 0, activePotionIdx: 0, activeAchievementIdx: 0, activeRecipeIdx: 0, activeTradeIdx: 0,
           activeLootEntryIdx: 0, activeBiomeIdx: 0, activeDimensionIdx: 0, activeArmorIdx: 0,
@@ -1920,6 +1950,19 @@ export default function EditorPage() {
           label: k.replace(/^custom\//, "").replace(/\.[^./]+$/, ""),
           thumb: packTextures[k],
           onOpen: () => { setMainView(null); openExistingTexture(k); },
+          // Same behavior as the Resources tab's own buttons (incl. its folder bookkeeping).
+          onRename: async () => {
+            const current = k.replace(/^custom\//, "").replace(/\.[^./]+$/, "");
+            const next = window.prompt("Rename image:", current);
+            if (!next || !next.trim() || next.trim() === current) return;
+            renameAssignedKey(k, await renameCustomTexture(k, next.trim()));
+          },
+          onDelete: async () => {
+            const name = k.replace(/^custom\//, "").replace(/\.[^./]+$/, "");
+            if (!window.confirm(`Delete “${name}”? Items or blocks using it will lose their texture.`)) return;
+            await deleteCustomTexture(k);
+            forgetKey(k);
+          },
         })),
       },
       named("achievements", achievements, "achievement", activeAchievementIdx, switchAchievement),
@@ -1945,9 +1988,9 @@ export default function EditorPage() {
     ].map((section) => {
       // Right-click actions (rename/duplicate/export/delete) are the category browser's own, so
       // both views behave identically — same list order, so entries line up by index.
-      if (section.key === "resources" || section.key === "skinGenerator" || section.key === "modelGenerator") return section;
+      if (isToolSection(section.key as SectionKey)) return section;
       // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
-      const actions = categoryView(section.key as Exclude<SectionKey, "resources" | "skinGenerator" | "modelGenerator">).entries;
+      const actions = categoryView(section.key as Exclude<SectionKey, ToolSection>).entries;
       return {
         ...section,
         entries: section.entries.map((e, i) => ({
@@ -1962,7 +2005,7 @@ export default function EditorPage() {
   };
 
   // One category's element browser (icon rail entry) — replaces the old text sidebar's lists.
-  const categoryView = (key: Exclude<SectionKey, "resources" | "skinGenerator" | "modelGenerator">): CategoryViewProps => {
+  const categoryView = (key: Exclude<SectionKey, ToolSection>): CategoryViewProps => {
     const tex = (k: string | undefined) => (k ? packTextures[k] : undefined);
     const close = () => setMainView(null);
     const build = <T extends { id: string; displayName?: string }>(o: {
@@ -2012,21 +2055,22 @@ export default function EditorPage() {
       onExportAll: o.exportAll,
       onMove: o.onMove,
     });
+    const withFolders = (section: FolderSection, view: ReturnType<typeof build>) => ({ ...view, folders: sectionFolderOps(section) });
     switch (key) {
-      case "screens": return build({ list: screens, docType: "screen", activeAt: activeIdx, open: switchScreen, add: addScreen, rename: renameScreen, remove: removeScreen, canRemove: screens.length > 1, exportOne: handleExportScreen, exportAll: handleExportAllScreens, onImport: handleImportClick, onMove: moveScreen });
-      case "items": return build({ list: items, docType: "item", activeAt: activeItemIdx, open: switchItem, add: addItem, rename: renameItem, remove: removeItem, duplicate: duplicateItem, exportOne: handleExportItem, exportAll: handleExportAllItems, importCategory: "items", thumb: (it) => tex(it.texture) });
-      case "blocks": return build({ list: blocks, docType: "block", activeAt: activeBlockIdx, open: switchBlock, add: addBlock, rename: renameBlock, remove: removeBlock, duplicate: duplicateBlock, exportOne: handleExportBlock, exportAll: handleExportAllBlocks, importCategory: "blocks", thumb: (b) => tex(b.texture) });
-      case "armors": return build({ list: armors, docType: "armor", activeAt: activeArmorIdx, open: switchArmor, add: addArmor, rename: renameArmor, remove: removeArmor, duplicate: duplicateArmor, exportOne: handleExportArmor, exportAll: handleExportAllArmors, importCategory: "armors", thumb: (a) => tex(a.iconChestplate) });
-      case "creativeTabs": return build({ list: creativeTabs, add: addCreativeTab, rename: renameCreativeTab, renameDisplayName: true, remove: removeCreativeTab });
-      case "customAttributes": return build({ list: customAttributes, docType: "attribute", activeAt: activeAttributeIdx, open: switchCustomAttribute, add: addCustomAttribute, rename: (i, displayName) => updateCustomAttribute(i, { displayName }), renameDisplayName: true, remove: removeCustomAttribute, duplicate: duplicateCustomAttribute, exportOne: handleExportCustomAttribute, exportAll: handleExportAllCustomAttributes, importCategory: "customAttributes" });
-      case "effects": return build({ list: effects, docType: "effect", activeAt: activeEffectIdx, open: switchEffect, add: addEffect, rename: renameEffect, remove: removeEffect, duplicate: duplicateEffect, exportOne: handleExportEffect, exportAll: handleExportAllEffects, importCategory: "effects", thumb: (e) => tex(e.icon) });
-      case "potions": return build({ list: potions, docType: "potion", activeAt: activePotionIdx, open: switchPotion, add: addPotion, rename: renamePotion, remove: removePotion, duplicate: duplicatePotion, exportOne: handleExportPotion, exportAll: handleExportAllPotions, importCategory: "potions" });
-      case "achievements": return build({ list: achievements, docType: "achievement", activeAt: activeAchievementIdx, open: switchAchievement, add: addAchievement, rename: renameAchievement, remove: removeAchievement, duplicate: duplicateAchievement, exportOne: handleExportAchievement, exportAll: handleExportAllAchievements, importCategory: "achievements" });
-      case "recipes": return build({ list: recipes, docType: "recipe", activeAt: activeRecipeIdx, open: switchRecipe, add: addRecipe, rename: renameRecipe, remove: removeRecipe, duplicate: duplicateRecipe, exportOne: handleExportRecipe, exportAll: handleExportAllRecipes, importCategory: "recipes" });
-      case "trades": return build({ list: trades, docType: "trade", activeAt: activeTradeIdx, open: switchTrade, add: addTrade, rename: renameTrade, remove: removeTrade, duplicate: duplicateTrade, exportOne: handleExportTrade, exportAll: handleExportAllTrades, importCategory: "trades" });
-      case "lootEntries": return build({ list: lootEntries, docType: "loot", activeAt: activeLootEntryIdx, open: switchLootEntry, add: addLootEntry, rename: renameLootEntry, remove: removeLootEntry, duplicate: duplicateLootEntry, exportOne: handleExportLootEntry, exportAll: handleExportAllLootEntries, importCategory: "lootEntries" });
-      case "biomes": return build({ list: biomes, docType: "biome", activeAt: activeBiomeIdx, open: switchBiome, add: addBiome, rename: renameBiome, remove: removeBiome, duplicate: duplicateBiome, exportOne: handleExportBiome, exportAll: handleExportAllBiomes, importCategory: "biomes" });
-      case "dimensions": return build({ list: dimensions, docType: "dimension", activeAt: activeDimensionIdx, open: switchDimension, add: addDimension, rename: renameDimension, remove: removeDimension, duplicate: duplicateDimension, exportOne: handleExportDimension, exportAll: handleExportAllDimensions, importCategory: "dimensions" });
+      case "screens": return withFolders("screens", build({ list: screens, docType: "screen", activeAt: activeIdx, open: switchScreen, add: addScreen, rename: renameScreen, remove: removeScreen, canRemove: screens.length > 1, exportOne: handleExportScreen, exportAll: handleExportAllScreens, onImport: handleImportClick, onMove: moveScreen }));
+      case "items": return withFolders("items", build({ list: items, docType: "item", activeAt: activeItemIdx, open: switchItem, add: addItem, rename: renameItem, remove: removeItem, duplicate: duplicateItem, exportOne: handleExportItem, exportAll: handleExportAllItems, importCategory: "items", thumb: (it) => tex(it.texture) }));
+      case "blocks": return withFolders("blocks", build({ list: blocks, docType: "block", activeAt: activeBlockIdx, open: switchBlock, add: addBlock, rename: renameBlock, remove: removeBlock, duplicate: duplicateBlock, exportOne: handleExportBlock, exportAll: handleExportAllBlocks, importCategory: "blocks", thumb: (b) => tex(b.texture) }));
+      case "armors": return withFolders("armors", build({ list: armors, docType: "armor", activeAt: activeArmorIdx, open: switchArmor, add: addArmor, rename: renameArmor, remove: removeArmor, duplicate: duplicateArmor, exportOne: handleExportArmor, exportAll: handleExportAllArmors, importCategory: "armors", thumb: (a) => tex(a.iconChestplate) }));
+      case "creativeTabs": return withFolders("creativeTabs", build({ list: creativeTabs, add: addCreativeTab, rename: renameCreativeTab, renameDisplayName: true, remove: removeCreativeTab }));
+      case "customAttributes": return withFolders("customAttributes", build({ list: customAttributes, docType: "attribute", activeAt: activeAttributeIdx, open: switchCustomAttribute, add: addCustomAttribute, rename: (i, displayName) => updateCustomAttribute(i, { displayName }), renameDisplayName: true, remove: removeCustomAttribute, duplicate: duplicateCustomAttribute, exportOne: handleExportCustomAttribute, exportAll: handleExportAllCustomAttributes, importCategory: "customAttributes" }));
+      case "effects": return withFolders("effects", build({ list: effects, docType: "effect", activeAt: activeEffectIdx, open: switchEffect, add: addEffect, rename: renameEffect, remove: removeEffect, duplicate: duplicateEffect, exportOne: handleExportEffect, exportAll: handleExportAllEffects, importCategory: "effects", thumb: (e) => tex(e.icon) }));
+      case "potions": return withFolders("potions", build({ list: potions, docType: "potion", activeAt: activePotionIdx, open: switchPotion, add: addPotion, rename: renamePotion, remove: removePotion, duplicate: duplicatePotion, exportOne: handleExportPotion, exportAll: handleExportAllPotions, importCategory: "potions" }));
+      case "achievements": return withFolders("achievements", build({ list: achievements, docType: "achievement", activeAt: activeAchievementIdx, open: switchAchievement, add: addAchievement, rename: renameAchievement, remove: removeAchievement, duplicate: duplicateAchievement, exportOne: handleExportAchievement, exportAll: handleExportAllAchievements, importCategory: "achievements" }));
+      case "recipes": return withFolders("recipes", build({ list: recipes, docType: "recipe", activeAt: activeRecipeIdx, open: switchRecipe, add: addRecipe, rename: renameRecipe, remove: removeRecipe, duplicate: duplicateRecipe, exportOne: handleExportRecipe, exportAll: handleExportAllRecipes, importCategory: "recipes" }));
+      case "trades": return withFolders("trades", build({ list: trades, docType: "trade", activeAt: activeTradeIdx, open: switchTrade, add: addTrade, rename: renameTrade, remove: removeTrade, duplicate: duplicateTrade, exportOne: handleExportTrade, exportAll: handleExportAllTrades, importCategory: "trades" }));
+      case "lootEntries": return withFolders("lootEntries", build({ list: lootEntries, docType: "loot", activeAt: activeLootEntryIdx, open: switchLootEntry, add: addLootEntry, rename: renameLootEntry, remove: removeLootEntry, duplicate: duplicateLootEntry, exportOne: handleExportLootEntry, exportAll: handleExportAllLootEntries, importCategory: "lootEntries" }));
+      case "biomes": return withFolders("biomes", build({ list: biomes, docType: "biome", activeAt: activeBiomeIdx, open: switchBiome, add: addBiome, rename: renameBiome, remove: removeBiome, duplicate: duplicateBiome, exportOne: handleExportBiome, exportAll: handleExportAllBiomes, importCategory: "biomes" }));
+      case "dimensions": return withFolders("dimensions", build({ list: dimensions, docType: "dimension", activeAt: activeDimensionIdx, open: switchDimension, add: addDimension, rename: renameDimension, remove: removeDimension, duplicate: duplicateDimension, exportOne: handleExportDimension, exportAll: handleExportAllDimensions, importCategory: "dimensions" }));
     }
     const kind = key.slice(3);
     const def = getElementKind(kind)!;
@@ -2041,7 +2085,11 @@ export default function EditorPage() {
       thumb: (spec) => { const t = def.thumb?.(spec); return t ? packTextures[t] : undefined; },
     });
     // Tiles show the def's label field (e.g. the enchantment's name) instead of the raw id.
-    return { ...view, entries: view.entries.map((e, i) => ({ ...e, label: elementLabel(def, list[i]), sublabel: elementLabel(def, list[i]) !== list[i].id ? list[i].id : undefined })) };
+    return {
+      ...view,
+      folders: elementFolderOps(kind),
+      onNew: (folder?: string | null) => { setMainView(null); addElement(kind, folder); },
+      entries: view.entries.map((e, i) => ({ ...e, label: elementLabel(def, list[i]), sublabel: elementLabel(def, list[i]) !== list[i].id ? list[i].id : undefined })) };
   };
 
   // ── Generic elements (lib/elements) ─────────────────────────────────────────
@@ -2055,11 +2103,70 @@ export default function EditorPage() {
       ...(active !== undefined ? { activeElement: { kind, idx: active }, activeDocType: "element" as const } : {}),
     });
   }
-  function addElement(kind: string) {
+  function addElement(kind: string, folder?: string | null) {
     const def = getElementKind(kind);
     if (!def) return;
     const list = elements[kind] ?? [];
-    setElementList(kind, [...list, normalizeElement(def, { id: newSpecId(def.idPrefix, list) })], list.length);
+    const spec = normalizeElement(def, { id: newSpecId(def.idPrefix, list) });
+    setElementList(kind, [...list, folder ? { ...spec, folder } : spec], list.length);
+  }
+
+  // ── Element folders (category view) — names live in entry.elementFolders[kind], membership in
+  // spec.folder. A folder referenced by an element but missing from the list still shows up.
+  function elementFolderList(kind: string): string[] {
+    const listed = entry.elementFolders?.[kind] ?? [];
+    const used = (elements[kind] ?? []).map((e) => (typeof e.folder === "string" ? e.folder : "")).filter(Boolean);
+    return [...new Set([...listed, ...used])];
+  }
+  function elementFolderOps(kind: string): CategoryFolders {
+    const specs = elements[kind] ?? [];
+    return folderOps<ElementSpec>(elementFolderList(kind), specs, (folders, nextSpecs) =>
+      commit({ ...entry, elements: { ...elements, [kind]: nextSpecs }, elementFolders: { ...(entry.elementFolders ?? {}), [kind]: folders } }));
+  }
+  /**
+   * Folders for the built-in categories (screens, items, blocks, …): same model as element folders —
+   * membership in spec.folder, names in entry.elementFolders under "@<section>" (no clash with
+   * element kinds).
+   */
+  function sectionFolderOps(key: FolderSection): CategoryFolders {
+    const specs = entry[key] as { folder?: unknown }[];
+    const listed = entry.elementFolders?.[`@${key}`] ?? [];
+    const used = specs.map((e) => (typeof e.folder === "string" ? e.folder : "")).filter(Boolean);
+    return folderOps([...new Set([...listed, ...used])], specs, (folders, nextSpecs) =>
+      commit({ ...entry, [key]: nextSpecs, elementFolders: { ...(entry.elementFolders ?? {}), [`@${key}`]: folders } }));
+  }
+  function folderOps<S extends object & { folder?: unknown }>(list: string[], specs: S[], write: (folders: string[], nextSpecs: S[]) => void): CategoryFolders {
+    const clean = (name: string) => name.replace(/[\\/]/g, "").trim().slice(0, 64);
+    const commitFolders = (folders: string[], nextSpecs: S[] = specs) => write(folders, nextSpecs);
+    const withoutFolder = (e: S): S => { const copy = { ...e }; delete copy.folder; return copy; };
+    return {
+      list,
+      of: (i) => (typeof specs[i]?.folder === "string" && specs[i].folder ? (specs[i].folder as string) : null),
+      create: (name) => {
+        const n = clean(name);
+        if (!n || list.includes(n)) { if (n) toast.error(`A folder “${n}” already exists.`); return false; }
+        commitFolders([...list, n]);
+        return true;
+      },
+      rename: (from, to) => {
+        const n = clean(to);
+        if (!n || (n !== from && list.includes(n))) { if (n) toast.error(`A folder “${n}” already exists.`); return false; }
+        commitFolders(list.map((f) => (f === from ? n : f)), specs.map((e) => (e.folder === from ? { ...e, folder: n } : e)));
+        return true;
+      },
+      remove: (name) => {
+        commitFolders(list.filter((f) => f !== name), specs.map((e) => {
+          return e.folder === name ? withoutFolder(e) : e;
+        }));
+      },
+      moveTo: (indices, folder) => {
+        const set = new Set(indices);
+        commitFolders(list, specs.map((e, i) => {
+          if (!set.has(i)) return e;
+          return folder ? { ...e, folder } : withoutFolder(e);
+        }));
+      },
+    };
   }
   function updateElement(kind: string, idx: number, patch: Partial<ElementSpec>) {
     setElementList(kind, (elements[kind] ?? []).map((el, i) => (i === idx ? { ...el, ...patch } : el)));
@@ -2361,16 +2468,36 @@ export default function EditorPage() {
               items={items}
               onApplyToItem={(idx, texture) => commit({ ...entry, items: items.map((it, i) => i === idx ? { ...it, texture } : it) })}
               onOpenItem={(idx) => { setMainView(null); switchItem(idx); }}
+              onCreateBannerPattern={(name, texture, shieldTexture) => {
+                const def = getElementKind("bannerPattern");
+                if (!def) return;
+                const list = elements.bannerPattern ?? [];
+                const base = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || def.idPrefix;
+                const id = list.some((e) => e.id === base) ? newSpecId(base, list) : base;
+                const spec = normalizeElement(def, { id, name: name.replace(/\b\w/g, (c) => c.toUpperCase()), texture, shieldTexture });
+                setMainView(null);
+                setElementList("bannerPattern", [...list, spec], list.length);
+                toast.success(`Created banner pattern “${id}”.`);
+              }}
+            />
+          ) : activeMainView === "blockGenerator" ? (
+            <BlockGeneratorPanel
               blocks={blocks}
               onApplyToBlock={(idx, texture) => commit({ ...entry, blocks: blocks.map((b, i) => i === idx ? { ...b, texture } : b) })}
               onOpenBlock={(idx) => { setMainView(null); switchBlock(idx); }}
+            />
+          ) : activeMainView === "armorGenerator" ? (
+            <ArmorGeneratorPanel
+              armors={armors}
+              onApplyToArmor={(idx, patch) => commit({ ...entry, armors: armors.map((a, i) => i === idx ? { ...a, ...patch } : a) })}
+              onOpenArmor={(idx) => { setMainView(null); switchArmor(idx); }}
             />
           ) : activeMainView === "modelGenerator" ? (
             <EntityModelGeneratorPanel
               activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
               onOpenModels={() => setMainView({ kind: "section", key: "el:entityModel" })}
             />
-          ) : mainView?.kind === "section" && mainView.key !== "resources" && mainView.key !== "skinGenerator" && mainView.key !== "modelGenerator" ? (
+          ) : mainView?.kind === "section" && !isToolSection(mainView.key) ? (
             // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
             <CategoryView key={mainView.key} {...categoryView(mainView.key)} />
           ) : (
@@ -2578,18 +2705,28 @@ export default function EditorPage() {
                 </div>
               </div>
             ) : activeDocType === "armor" ? (
-              <div className="flex-1 overflow-y-auto p-4">
-                <div className="mx-auto max-w-3xl">
-                  <ArmorPropertyPanel
-                    armor={activeArmor}
-                    items={items}
-                    creativeTabs={creativeTabs}
-                    modId={friendlyModId()}
-                    onUpdate={(patch) => updateArmor(activeArmorIdx, patch)}
-                    onOpenTextureEditor={(field) => openTextureEditor({ docType: "armor", index: activeArmorIdx, field })}
-                  />
-                </div>
-              </div>
+              <ArmorWorkspace
+                armor={activeArmor}
+                modId={friendlyModId()}
+                mcVersion={mcVersion}
+                fieldCtx={{
+                  modId: friendlyModId(),
+                  mcVersion,
+                  projectItems: items.map((it) => `${friendlyModId()}:${it.id}`),
+                  projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
+                  projectScreens: screens.map((sc) => sc.id),
+                }}
+                onUpdate={(patch) => updateArmor(activeArmorIdx, patch)}
+              >
+                <ArmorPropertyPanel
+                  armor={activeArmor}
+                  items={items}
+                  creativeTabs={creativeTabs}
+                  modId={friendlyModId()}
+                  onUpdate={(patch) => updateArmor(activeArmorIdx, patch)}
+                  onOpenTextureEditor={(field) => openTextureEditor({ docType: "armor", index: activeArmorIdx, field })}
+                />
+              </ArmorWorkspace>
             ) : (
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="mx-auto max-w-3xl">
@@ -2766,6 +2903,7 @@ export default function EditorPage() {
               <span className={`inline-block h-2 w-2 rounded-full ${!bridgeEnabled ? "bg-muted-foreground/40" : bridge.status === "connected" ? "bg-green-500" : bridge.status === "busy" ? "animate-pulse bg-primary" : "bg-amber-500"}`} />
               AI bridge{bridgeEnabled ? (bridge.status === "connecting" ? " · waiting for MCP server" : bridge.status === "busy" ? ` · ${bridge.lastTool}` : " · on") : ""}
             </button>
+            <CloudStatusChip />
             <label className="flex items-center gap-1" title="Minecraft version the project's files are generated for">
               Minecraft
               <select

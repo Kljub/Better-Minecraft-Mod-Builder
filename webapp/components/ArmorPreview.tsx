@@ -3,10 +3,10 @@
 import React from "react";
 import type { ArmorSpec } from "@/lib/types";
 import { useTextures } from "@/lib/TextureContext";
-import SteveViewer3D from "@/components/SteveViewer3D";
+import PlayerSkinViewer3D from "@/components/PlayerSkinViewer3D";
 
-/** Simple centerpiece for the currently selected Armor Set — the full set worn simultaneously on
- * the fixed-topology 3D Steve viewer (all 4 pieces share the one body texture). */
+/** Centerpiece for the currently selected Armor Set — the full set worn on a 3D player with the
+ * real vanilla armor UV layout (layer 1 for helmet/chestplate/boots, layer 2 for leggings). */
 export default function ArmorPreview({ armor }: { armor: ArmorSpec | null }) {
   const { packTextures } = useTextures();
 
@@ -14,11 +14,12 @@ export default function ArmorPreview({ armor }: { armor: ArmorSpec | null }) {
     return <div className="text-sm text-muted-foreground italic">Select or add an armor set.</div>;
   }
 
-  const url = packTextures[armor.equipmentTexture];
+  const layer1 = packTextures[armor.equipmentTexture];
+  const layer2 = (armor.equipmentLeggingsTexture && packTextures[armor.equipmentLeggingsTexture]) || layer1;
 
   return (
     <div className="flex flex-col items-center gap-1">
-      <SteveViewer3D textures={{ helmet: url, chestplate: url, leggings: url, boots: url }} />
+      <PlayerSkinViewer3D armor={{ layer1, layer2 }} className="h-[320px] w-[240px]" />
       <span className="text-sm font-medium">{armor.displayName || armor.id}</span>
       <span className="text-[10px] text-muted-foreground">Drag to rotate — fixed model, not editable</span>
     </div>

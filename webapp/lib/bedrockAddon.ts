@@ -4,6 +4,9 @@ import type { EntityModel } from "./model3d/types";
 import { toBedrockGeo, sanitizeBoneNames } from "./model3d/codecs";
 import { toBedrockAnimations } from "./model3d/animation";
 import { entitySettingsOf } from "./elements/modelKind";
+import { bedrockLootTable, deathDrops } from "./elements/entitySettings";
+
+const bedrockDrops = (s: Record<string, unknown>) => deathDrops(s).filter((d) => d.item.startsWith("minecraft:"));
 
 /**
  * Bedrock Edition add-on (.mcaddon) for the project's custom mobs: a behavior pack (entity with
@@ -87,6 +90,8 @@ export function behaviorEntity(modId: string, spec: ElementSpec): Record<string,
       ? { "minecraft:navigation.swim": { can_swim: true, can_walk: false, can_breach: true }, "minecraft:movement.basic": {}, "minecraft:underwater_movement": { value: num(s, "movementSpeed", 0.25) } }
       : { "minecraft:navigation.walk": { can_walk: true, avoid_water: true, can_pass_doors: true, can_open_doors: false }, "minecraft:movement.basic": {}, "minecraft:jump.static": {}, "minecraft:can_climb": {} }),
   };
+  // Java mod items don't exist on Bedrock, so only vanilla drops make it into the add-on.
+  if (bedrockDrops(s).length) components["minecraft:loot"] = { table: `loot_tables/entities/${spec.id}.json` };
   if (num(s, "knockbackResistance", 0) > 0) components["minecraft:knockback_resistance"] = { value: Math.min(1, num(s, "knockbackResistance", 0)) };
   if (s.fireImmune === true) components["minecraft:fire_immune"] = {};
   if (str(s, "mobCategory") === "monster") components["minecraft:despawn"] = { despawn_from_distance: {} };
@@ -189,6 +194,8 @@ export async function buildBedrockAddon(opts: { modId: string; packName: string;
     const s = entitySettingsOf(spec);
     const name = str(s, "displayName").trim() || spec.id;
     bp.file(`entities/${spec.id}.json`, json(behaviorEntity(modId, spec)));
+    const drops = bedrockDrops(s);
+    if (drops.length) bp.file(`loot_tables/entities/${spec.id}.json`, json(bedrockLootTable(drops)));
     const rules = spawnRules(modId, spec);
     if (rules) bp.file(`spawn_rules/${spec.id}.json`, json(rules));
     rp.file(`entity/${spec.id}.entity.json`, json(clientEntity(modId, spec)));

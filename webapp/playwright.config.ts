@@ -31,6 +31,9 @@ export default defineConfig({
     url: "http://localhost:3100",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    env: { PLAYWRIGHT_TEST: "1" },
+    // MMB_DB_NAME="" keeps accounts off for the test server (no login screen; projects seeded into
+    // localStorage as before) even when .env.local configures the database. tests/e2e/accounts.spec.ts
+    // runs against a server with accounts on.
+    env: { PLAYWRIGHT_TEST: "1", MMB_DB_NAME: "" },
   },
 });

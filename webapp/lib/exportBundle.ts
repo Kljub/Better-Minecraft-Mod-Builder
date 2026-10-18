@@ -1,4 +1,6 @@
 import JSZip from "jszip";
+import { toBedrockGeo } from "./model3d/codecs";
+import { armorRuntimeModel } from "./model3d/armorModel";
 import type { ElementsByKind } from "./elements/types";
 import { DEFAULT_MC_VERSION, type McVersion } from "./mcVersion";
 import { writeElementFiles, writeElementArchiveCopies, hasElements, elementTextureKeys, elementBinaryKeys } from "./elements/export";
@@ -83,6 +85,12 @@ function blockItemModelJson(modId: string, block: BlockSpec): string {
 // folders vanilla expects. Verified against real vanilla equipment JSON (iron.json/leather.json) —
 // see plan file research notes. The armor_material itself is Java-only (no datapack registry), so
 // unlike every other content type this session neoforge-runtime has to build it from this manifest.
+
+/** armors.json entry: the spec without the editor-only model, plus the runtime's customModel. */
+function armorManifestEntry(armor: ArmorSpec) {
+  const { model, ...rest } = armor;
+  return model?.cubes.length ? { ...rest, customModel: armorRuntimeModel(model, armor.id) } : rest;
+}
 
 function armorPieceModelJson(modId: string, texture: string): string {
   return JSON.stringify(
@@ -439,6 +447,7 @@ function collectAllSrcs(r: ResolvedInput): Set<string> {
     if (a.iconLeggings) srcs.add(a.iconLeggings);
     if (a.iconBoots) srcs.add(a.iconBoots);
     if (a.equipmentTexture) srcs.add(a.equipmentTexture);
+    if (a.equipmentLeggingsTexture) srcs.add(a.equipmentLeggingsTexture);
   }
   return srcs;
 }
@@ -583,19 +592,30 @@ function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: Resol
       zip.file(`${prefix}assets/${modId}/models/item/${pieceId}.json`, armorPieceModelJson(modId, texture));
       zip.file(`${prefix}assets/${modId}/items/${pieceId}.json`, itemDefinitionJson(`${modId}:item/${pieceId}`));
     }
-    if (armor.equipmentTexture) {
+    // The equipment asset's layers are what make the game draw armor at all — needed for a custom
+    // 3D model too (the runtime swaps in its own model + texture per layer).
+    if (armor.equipmentTexture || armor.model?.cubes.length) {
       zip.file(`${prefix}assets/${modId}/equipment/${armor.id}.json`, equipmentAssetJson(modId, armor.id));
+    }
+    if (armor.equipmentTexture) {
       const blob = allTextures[`pack:${armor.equipmentTexture}`];
+      const leggings = armor.equipmentLeggingsTexture ? allTextures[`pack:${armor.equipmentLeggingsTexture}`] : undefined;
       if (blob) {
         zip.file(`${prefix}assets/${modId}/textures/entity/equipment/humanoid/${armor.id}.png`, blob);
-        zip.file(`${prefix}assets/${modId}/textures/entity/equipment/humanoid_leggings/${armor.id}.png`, blob);
+        zip.file(`${prefix}assets/${modId}/textures/entity/equipment/humanoid_leggings/${armor.id}.png`, leggings ?? blob);
       }
+    }
+    if (armor.model?.cubes.length) {
+      // ArmorModelAPI layout (assets/<mod>/geo + textures/armor); the runtime reads customModel below.
+      zip.file(`${prefix}assets/${modId}/geo/${armor.id}.geo.json`, JSON.stringify(toBedrockGeo(armor.model, { identifier: armor.id }), null, 2));
+      const tex = armor.model.texture ? allTextures[`pack:${armor.model.texture}`] : undefined;
+      if (tex) zip.file(`${prefix}assets/${modId}/textures/armor/${armor.id}.png`, tex);
     }
     if (armor.repairItem) {
       zip.file(`${prefix}data/${modId}/tags/item/${armor.id}_repair.json`, JSON.stringify({ values: [armor.repairItem] }, null, 2));
     }
   }
-  if (r.armors.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/armors.json`, JSON.stringify(r.armors, null, 2));
+  if (r.armors.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/armors.json`, JSON.stringify(r.armors.map(armorManifestEntry), null, 2));
 
   writeElementFiles(zip, prefix, r.elements, {
     modId, mcVersion: r.mcVersion, texture: (k) => allTextures[`pack:${k}`], file: (k) => allTextures[`structure:${k}`],

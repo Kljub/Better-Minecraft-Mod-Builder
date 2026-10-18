@@ -4,6 +4,10 @@ import { createServer } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
 import { childEnv, guardRequest } from "../cli";
+import { registerAgentPort, unregisterAgentPort } from "@/lib/ai/bridgePorts";
+import { currentUser } from "@/lib/server/auth";
+import { finishAiRun, startAiRun } from "@/lib/server/modelDataset";
+import { accountQueue, claudeQuota, isLimitError, markLimited, openAccount, recordQuota, type Quota, type RunAccount } from "@/lib/server/aiAccounts";
 
 /**
  * Entity Model Generator backend: runs Claude Code or Codex headless as an agent that builds in
@@ -97,65 +101,114 @@ export async function POST(request: Request) {
     stdin = `${SYSTEM}\n\n---\n\n${prompt}${active}`;
   }
 
+  // Linked accounts (Settings → AI): queue order, free quota first; empty = the host's own login.
+  const user = await currentUser(request).catch(() => null);
+  const queue = user ? await accountQueue(user.id, provider) : [];
+  // Training data: prompt → the models this run builds (lib/server/modelDataset.ts).
+  const runId = user ? await startAiRun(user.id, provider, prompt, queue[0]?.label ?? null).catch(() => null) : null;
+  const toolLog: { name: string; input: unknown }[] = [];
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
       let closed = false;
+      let aborted = false;
       const emit = (ev: Record<string, unknown>) => {
         if (!closed) controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
       };
-      const child = spawn(provider, args, { cwd: dir, env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
-      running = child;
+      const timer = setTimeout(() => { emit({ type: "text", text: "Time limit reached — stopping." }); running?.kill("SIGTERM"); }, TIMEOUT_MS);
+      registerAgentPort(port);
       emit({ type: "start", port });
-      let finalText = "";
-      let ok = false;
-      let stderr = "";
-      let buf = "";
-      const timer = setTimeout(() => { emit({ type: "text", text: "Time limit reached — stopping." }); child.kill("SIGTERM"); }, TIMEOUT_MS);
 
-      const onLine = (line: string) => {
-        let d: Record<string, unknown>;
-        try { d = JSON.parse(line); } catch { return; }
-        if (provider === "claude") {
-          const msg = d.message as { content?: { type: string; name?: string; input?: unknown; text?: string }[] } | undefined;
-          if (d.type === "assistant") {
-            for (const c of msg?.content ?? []) {
-              if (c.type === "tool_use") emit({ type: "tool", name: String(c.name).replace(/^mcp__mc-designer__/, ""), detail: short(c.input) });
-              else if (c.type === "text" && c.text?.trim()) emit({ type: "text", text: c.text.trim() });
-            }
-          } else if (d.type === "result") {
-            ok = d.subtype === "success" && !d.is_error;
-            finalText = typeof d.result === "string" ? d.result : "";
-          }
-        } else {
-          const item = d.item as { type?: string; tool?: string; arguments?: unknown; text?: string } | undefined;
-          if (d.type === "item.started" && item?.type === "mcp_tool_call") emit({ type: "tool", name: item.tool, detail: short(item.arguments) });
-          else if (d.type === "item.completed" && item?.type === "agent_message" && item.text) { finalText = item.text; emit({ type: "text", text: item.text }); }
-          else if (d.type === "turn.completed") ok = true;
-          else if (d.type === "turn.failed" || d.type === "error") emit({ type: "text", text: short(d.error ?? d.message ?? d, 300) });
-        }
-      };
-      child.stdout!.on("data", (chunk) => {
-        buf += chunk;
-        let i;
-        while ((i = buf.indexOf("\n")) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
-      });
-      child.stderr!.on("data", (c) => { stderr = (stderr + c).slice(-4000); });
-      let finished = false;
-      const finish = (extra?: string) => {
-        if (finished) return;
-        finished = true;
+      const end = (ok: boolean, text: string) => {
+        if (runId != null && user) void finishAiRun(runId, user.id, { ok, resultText: text, tools: toolLog }).catch(() => {});
         clearTimeout(timer);
-        if (running === child) running = null;
-        emit({ type: "done", ok, text: finalText || extra || (ok ? "" : stderr.trim().split("\n").slice(-3).join("\n")) });
+        running = null;
+        unregisterAgentPort(port);
+        emit({ type: "done", ok, text });
         if (!closed) { closed = true; controller.close(); }
         rm(dir, { recursive: true, force: true }).catch(() => {});
       };
-      child.on("error", (e) => finish(`Could not start ${provider}: ${e.message}`));
-      child.on("close", () => finish());
-      child.stdin!.end(stdin);
+
+      /** One run with queue[index] (or the host login). Retries with the next account when this one
+       * is out of quota before it did anything. */
+      const attempt = async (index: number) => {
+        const row = queue[index];
+        let account: RunAccount | undefined;
+        try {
+          account = row && user ? await openAccount(user.id, row) : undefined;
+        } catch (e) {
+          end(false, `Couldn't open account "${row?.label}": ${(e as Error).message}`);
+          return;
+        }
+        if (account) emit({ type: "info", text: `Using ${provider} account "${account.label}"` });
+        const runArgs = account && provider === "codex" ? args.filter((a) => a !== "--ephemeral") : args;
+        const child = spawn(provider, runArgs, { cwd: dir, env: { ...childEnv(), ...account?.env }, stdio: ["pipe", "pipe", "pipe"] });
+        running = child;
+        let finalText = "";
+        let ok = false;
+        let stderr = "";
+        let buf = "";
+        let toolCalls = 0;
+        let quota: Quota | null = null;
+
+        const onLine = (line: string) => {
+          let d: Record<string, unknown>;
+          try { d = JSON.parse(line); } catch { return; }
+          if (provider === "claude") {
+            const msg = d.message as { content?: { type: string; name?: string; input?: unknown; text?: string }[] } | undefined;
+            if (d.type === "assistant") {
+              for (const c of msg?.content ?? []) {
+                if (c.type === "tool_use") { toolCalls++; toolLog.push({ name: String(c.name).replace(/^mcp__mc-designer__/, ""), input: c.input }); emit({ type: "tool", name: String(c.name).replace(/^mcp__mc-designer__/, ""), detail: short(c.input) }); }
+                else if (c.type === "text" && c.text?.trim()) emit({ type: "text", text: c.text.trim() });
+              }
+            } else if (d.type === "result") {
+              ok = d.subtype === "success" && !d.is_error;
+              finalText = typeof d.result === "string" ? d.result : "";
+            } else if (d.type === "rate_limit_event" && d.rate_limit_info) {
+              quota = claudeQuota(d.rate_limit_info as Parameters<typeof claudeQuota>[0]);
+            }
+          } else {
+            const item = d.item as { type?: string; tool?: string; arguments?: unknown; text?: string } | undefined;
+            if (d.type === "item.started" && item?.type === "mcp_tool_call") { toolCalls++; toolLog.push({ name: String(item.tool), input: item.arguments }); emit({ type: "tool", name: item.tool, detail: short(item.arguments) }); }
+            else if (d.type === "item.completed" && item?.type === "agent_message" && item.text) { finalText = item.text; emit({ type: "text", text: item.text }); }
+            else if (d.type === "turn.completed") ok = true;
+            else if (d.type === "turn.failed" || d.type === "error") { finalText = short(d.error ?? d.message ?? d, 300); emit({ type: "text", text: finalText }); }
+          }
+        };
+        child.stdout!.on("data", (chunk) => {
+          buf += chunk;
+          let i;
+          while ((i = buf.indexOf("\n")) >= 0) { onLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
+        });
+        child.stderr!.on("data", (c) => { stderr = (stderr + c).slice(-4000); });
+        let settled = false;
+        const settle = async (extra?: string) => {
+          if (settled) return;
+          settled = true;
+          const text = finalText || extra || (ok ? "" : stderr.trim().split("\n").slice(-3).join("\n"));
+          const q = quota as Quota | null;
+          if (account) {
+            if (q) await recordQuota(account.id, q).catch(() => {});
+            const limited = !ok && ((q && q.status === "limited") || isLimitError(text));
+            if (limited && !q) await markLimited(account.id).catch(() => {});
+            await account.finish().catch(() => {});
+            if (limited && !aborted && toolCalls === 0 && index + 1 < queue.length) {
+              emit({ type: "info", text: `"${account.label}" is at its usage limit — switching to the next account.` });
+              void attempt(index + 1);
+              return;
+            }
+          }
+          end(ok, text);
+        };
+        child.on("error", (e) => void settle(`Could not start ${provider}: ${e.message}`));
+        child.on("close", () => void settle());
+        child.stdin!.end(stdin);
+      };
+
       // Browser pressed Stop or closed the tab → end the agent (and with it its MCP server).
-      request.signal.addEventListener("abort", () => { closed = true; child.kill("SIGTERM"); });
+      request.signal.addEventListener("abort", () => { aborted = true; closed = true; running?.kill("SIGTERM"); });
+      void attempt(0);
     },
   });
   return new Response(stream, { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });

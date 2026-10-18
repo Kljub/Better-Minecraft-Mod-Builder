@@ -91,7 +91,7 @@ export default function SettingsDialog({
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className={tab === "ai" ? "max-h-[90vh] overflow-y-auto sm:max-w-2xl" : "sm:max-w-sm"}>
           <DialogHeader>
             <DialogTitle>Settings</DialogTitle>
           </DialogHeader>

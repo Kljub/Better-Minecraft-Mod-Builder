@@ -260,6 +260,8 @@ export function generateAnimation(model: EntityModel, kind: "walk" | "idle" | "a
     anim = setKeyframe(anim, bone, ch, Math.round(t * 1000) / 1000, v.map((x) => Math.round(x * 100) / 100 + 0) as Vec3, interp);
   };
   const L = anim.length;
+  // The mob faces north (-Z). In these (Blockbench/three.js) rotations a hanging limb swings
+  // towards the face with +X, and a head pitches down with -X.
   const front = (b: ModelBone) => b.origin[2] < 0;
   for (const b of model.bones) {
     const role = roles.get(b.id);
@@ -277,8 +279,8 @@ export function generateAnimation(model: EntityModel, kind: "walk" | "idle" | "a
       if (role === "arm_l" || role === "arm_r") [0, 0.5, 1].forEach((f, i) => key(b.id, "rotation", f * L, [0, 0, [0, (role === "arm_l" ? -3 : 3) * k, 0][i]]));
       if (role === "tail") [0, 0.5, 1].forEach((f, i) => key(b.id, "rotation", f * L, [0, [-8 * k, 8 * k, -8 * k][i], 0]));
     } else if (kind === "attack") {
-      if (role === "arm_l" || role === "arm_r") { key(b.id, "rotation", 0, [0, 0, 0]); key(b.id, "rotation", 0.4 * L, [-110 * k, 0, 0]); key(b.id, "rotation", L, [0, 0, 0]); }
-      if (role === "head") { key(b.id, "rotation", 0, [0, 0, 0]); key(b.id, "rotation", 0.4 * L, [15 * k, 0, 0]); key(b.id, "rotation", L, [0, 0, 0]); }
+      if (role === "arm_l" || role === "arm_r") { key(b.id, "rotation", 0, [0, 0, 0]); key(b.id, "rotation", 0.4 * L, [110 * k, 0, 0]); key(b.id, "rotation", L, [0, 0, 0]); }
+      if (role === "head") { key(b.id, "rotation", 0, [0, 0, 0]); key(b.id, "rotation", 0.4 * L, [-15 * k, 0, 0]); key(b.id, "rotation", L, [0, 0, 0]); }
       if (role === "body") { key(b.id, "position", 0, [0, 0, 0]); key(b.id, "position", 0.4 * L, [0, 0, -2 * k]); key(b.id, "position", L, [0, 0, 0]); }
     } else {
       if (role === "wing_l" || role === "wing_r") {
@@ -286,7 +288,7 @@ export function generateAnimation(model: EntityModel, kind: "walk" | "idle" | "a
         [0, 0.5, 1].forEach((f, i) => key(b.id, "rotation", f * L, [0, 0, [40 * k * s, -30 * k * s, 40 * k * s][i]]));
       }
       if (role === "body") [0, 0.5, 1].forEach((f, i) => key(b.id, "position", f * L, [0, [0, 1.5 * k, 0][i], 0]));
-      if (role === "leg_l" || role === "leg_r") key(b.id, "rotation", 0, [25 * k, 0, 0], "linear");
+      if (role === "leg_l" || role === "leg_r") key(b.id, "rotation", 0, [-25 * k, 0, 0], "linear"); // legs trail backwards
     }
   }
   if (!Object.keys(anim.bones).length) throw new Error(`No bones with recognisable names (legs/arms/head/tail/wings/body) for a ${kind} animation.`);

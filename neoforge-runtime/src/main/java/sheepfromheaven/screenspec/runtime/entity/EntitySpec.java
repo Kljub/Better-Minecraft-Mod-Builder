@@ -41,6 +41,18 @@ public class EntitySpec {
     public String idleAnimation = "";
     public String walkAnimation = "";
     public String attackAnimation = "";
+    /** items rolled each time the mob takes damage; death drops use the loot table data/<modid>/loot_table/entities/<id>.json */
+    public List<HurtDrop> hurtDrops = new ArrayList<>();
+
+    public static class HurtDrop {
+        /** item id, e.g. "minecraft:feather" */
+        public String item;
+        public int min = 1, max = 1;
+        /** 0–1, per hit */
+        public double chance = 0.25;
+        /** only when the damage comes from a player */
+        public boolean playerOnly;
+    }
 
     public static class Part {
         public String name;

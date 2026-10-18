@@ -3,6 +3,8 @@
  * they live in IndexedDB (own database, like the texture store) instead of the project JSON in
  * localStorage. The element spec only stores the key. Per browser, like custom textures.
  */
+import { cloudDeleteFile, cloudPutFile } from "@/lib/cloud/sync";
+
 const DB_NAME = "mc-ui-builder-structures";
 const STORE = "structures";
 
@@ -29,6 +31,7 @@ function run<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequ
 export async function saveStructureFile(file: Blob, name: string): Promise<string> {
   const key = `${crypto.randomUUID().slice(0, 8)}/${name.replace(/[^\w.-]/g, "_")}`;
   await run("readwrite", (s) => s.put(file, key));
+  cloudPutFile("structure", key, file);
   return key;
 }
 
@@ -48,4 +51,5 @@ export async function loadStructureFiles(keys: string[]): Promise<Record<string,
 
 export async function deleteStructureFile(key: string): Promise<void> {
   await run("readwrite", (s) => s.delete(key));
+  cloudDeleteFile("structure", key);
 }

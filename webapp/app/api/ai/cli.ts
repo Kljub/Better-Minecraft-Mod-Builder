@@ -2,6 +2,8 @@ import { spawn } from "child_process";
 import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import type { Quota, RunAccount } from "@/lib/server/aiAccounts";
+import { claudeQuota } from "@/lib/server/aiAccounts";
 
 /**
  * Server-side bridge to the local AI clients used by the Settings → AI integration. The CLIs run
@@ -50,9 +52,9 @@ export function childEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function run(cmd: string, args: string[], opts: { stdin?: string; cwd?: string; timeoutMs?: number } = {}) {
+function run(cmd: string, args: string[], opts: { stdin?: string; cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...childEnv(), ...opts.env }, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => {
@@ -106,6 +108,9 @@ export async function runStructured(
   system: string,
   prompt: string,
   schema: object,
+  /** a linked account (Settings → AI) instead of the host's own CLI login */
+  account?: RunAccount,
+  onQuota?: (q: Quota) => void,
 ): Promise<unknown> {
   if (provider === "ollama") {
     const name = model || (await ollamaModels())?.[0];
@@ -128,14 +133,21 @@ export async function runStructured(
   const dir = await mkdtemp(join(tmpdir(), "mc-ui-ai-"));
   try {
     if (provider === "claude") {
+      // stream-json: same result event as "json", plus rate_limit_event with the account's quota.
       const args = [
-        "-p", "--output-format", "json", "--tools", "", "--no-session-persistence", "--setting-sources", "",
+        "-p", "--output-format", "stream-json", "--verbose", "--tools", "", "--no-session-persistence", "--setting-sources", "",
         "--system-prompt", system, "--json-schema", JSON.stringify(schema),
       ];
       if (model) args.push("--model", model);
-      const { code, stdout, stderr } = await run("claude", args, { stdin: prompt, cwd: dir });
-      let out: { is_error?: boolean; result?: string; structured_output?: unknown } | null = null;
-      try { out = JSON.parse(stdout); } catch { /* handled below */ }
+      const { code, stdout, stderr } = await run("claude", args, { stdin: prompt, cwd: dir, env: account?.env });
+      type ResultEvent = { is_error?: boolean; result?: string; structured_output?: unknown };
+      let out: ResultEvent | null = null;
+      for (const line of stdout.split("\n")) {
+        let ev: ResultEvent & { type?: string; rate_limit_info?: Parameters<typeof claudeQuota>[0] };
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (ev?.type === "result") out = ev;
+        else if (ev?.type === "rate_limit_event" && ev.rate_limit_info) onQuota?.(claudeQuota(ev.rate_limit_info));
+      }
       if (code !== 0 || !out || out.is_error) {
         throw new Error(`claude failed: ${out?.result ?? lastLines(stderr || stdout)}`);
       }
@@ -146,13 +158,16 @@ export async function runStructured(
     const outPath = join(dir, "out.json");
     await writeFile(schemaPath, JSON.stringify(schema));
     const args = [
-      "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral", "--color", "never", "--ignore-user-config",
+      "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--color", "never", "--ignore-user-config",
       "--output-schema", schemaPath, "-o", outPath,
     ];
+    // With a linked account the session goes to its private CODEX_HOME (read for rate limits,
+    // then deleted); with the host login, keep nothing.
+    if (!account) args.push("--ephemeral");
     if (model) args.push("-m", model);
     args.push("-");
     // codex exec has no system-prompt flag — instructions go in front of the request.
-    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}`, cwd: dir });
+    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}`, cwd: dir, env: account?.env });
     if (code !== 0) throw new Error(`codex failed: ${lastLines(stderr || stdout)}`);
     return JSON.parse(await readFile(outPath, "utf-8"));
   } finally {

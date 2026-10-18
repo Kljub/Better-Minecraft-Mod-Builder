@@ -173,3 +173,21 @@ test("model editor: skin tab moves UV areas (with pixels) and shares one face on
   await expect.poll(() => page.getByTestId("uv-overlay").locator("rect").evaluateAll((els) =>
     new Set(els.map((e) => ["x", "y", "width", "height"].map((a) => e.getAttribute(a)).join(","))).size)).toBe(6);
 });
+
+test("model editor: settings tab edits death and hurt drops", async ({ page }) => {
+  await newModel(page);
+  await page.getByRole("tab", { name: "Settings" }).click();
+  const settings = page.getByTestId("entity-settings");
+  await settings.getByRole("button", { name: "Add drop" }).click();
+  const drop = settings.locator('[data-field="drops"]');
+  await drop.locator('[data-field="item"] input').fill("minecraft:bone");
+  await drop.locator('[data-field="max"] input').fill("3");
+  await drop.locator('[data-field="max"] input').press("Enter");
+  await settings.getByRole("button", { name: "Add hurt drop" }).click();
+  await expect(settings.locator('[data-field="hurtDrops"] [data-field="chance"] input')).toHaveValue("0.25");
+  // Survives switching tabs (stored on the element).
+  await page.getByRole("tab", { name: "Design" }).click();
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await expect(page.getByTestId("entity-settings").locator('[data-field="drops"] [data-field="item"] input')).toHaveValue("minecraft:bone");
+  await expect(page.getByTestId("entity-settings").locator('[data-field="drops"] [data-field="max"] input')).toHaveValue("3");
+});

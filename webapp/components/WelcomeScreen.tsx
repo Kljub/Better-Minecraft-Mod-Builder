@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Trash2, FolderOpen } from "lucide-react";
+import { AccountMenu } from "@/components/AuthGate";
 import {
   Dialog,
   DialogContent,
@@ -53,7 +54,8 @@ export default function WelcomeScreen({ projects, onOpenProject, onCreateProject
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-8 bg-background">
+    <div className="relative flex min-h-screen flex-col items-center justify-center gap-8 bg-background">
+      <div className="absolute right-4 top-3"><AccountMenu /></div>
       <div className="text-center">
         <h1 className="text-3xl font-bold tracking-tight">MC Screen Designer</h1>
         <p className="mt-1 text-sm text-muted-foreground">

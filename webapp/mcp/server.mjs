@@ -253,7 +253,7 @@ forward("generate_animation", "Generate a base animation from bone names (legs/a
   model: z.string(), kind: z.enum(["walk", "idle", "attack", "fly"]), name: z.string().optional(), speed: z.number().positive().optional(), intensity: z.number().positive().optional(),
 });
 
-forward("set_entity_settings", "Mob settings: displayName, behavior (passive|neutral|hostile_melee|stationary), mobCategory, maxHealth, movementSpeed, attackDamage, damageType, armor, knockbackResistance, followRange, hitboxWidth, hitboxHeight, xpReward, fireImmune, spawnEgg, eggPrimary, eggSecondary, naturalSpawn, spawnBiomes, spawnWeight, spawnMin, spawnMax, idleAnimation, walkAnimation, attackAnimation.", {
+forward("set_entity_settings", "Mob settings: displayName, behavior (passive|neutral|hostile_melee|stationary), mobCategory, maxHealth, movementSpeed, attackDamage, damageType, armor, knockbackResistance, followRange, hitboxWidth, hitboxHeight, xpReward, fireImmune, spawnEgg, eggPrimary, eggSecondary, naturalSpawn, spawnBiomes, spawnWeight, spawnMin, spawnMax, idleAnimation, walkAnimation, attackAnimation, drops (death loot: [{item, min, max, chance 0–1, lootingBonus, playerKillOnly, smeltWhenOnFire}]), hurtDrops (rolled on every hit: [{item, min, max, chance 0–1, playerOnly}]).", {
   model: z.string(), settings: z.record(z.string(), z.unknown()),
 });
 
@@ -301,7 +301,8 @@ const GUIDES = {
 - paint_texture for arbitrary texture pixels. Texture size comes from pack_uv; don't change it afterwards without re-packing.`,
   animation: `ANIMATION
 - Values are offsets on the rest pose: rotation degrees (X = pitch forward/back, Y = yaw, Z = roll), position px, scale factor.
-- walk: legs swing ±30–45° on X in opposite phase, arms opposite to legs, ~1 s loop. idle: subtle breathing (body scale 1→1.02) or head sway, 2–4 s loop. attack: arms/head snap forward, 0.3–0.6 s, loop "once".
+- Direction (the mob faces north, -Z): rotation +X swings a hanging arm/leg FORWARD (towards the face), -X swings it back; a head pitches DOWN with -X and up with +X; position -Z moves forward. Check the front view after keying an attack.
+- walk: legs swing ±30–45° on X in opposite phase, arms opposite to legs, ~1 s loop. idle: subtle breathing (body scale 1→1.02) or head sway, 2–4 s loop. attack: arms swing forward (+X, e.g. 90–110°) and the head dips (-X), body lunges to -Z, 0.3–0.6 s, loop "once".
 - generate_animation gives a starting point from bone names; refine with add_keyframes; check with screenshot(animation, time).
 - Assign them in set_entity_settings: idleAnimation, walkAnimation, attackAnimation.`,
   mob_settings: `MOB SETTINGS (set_entity_settings)

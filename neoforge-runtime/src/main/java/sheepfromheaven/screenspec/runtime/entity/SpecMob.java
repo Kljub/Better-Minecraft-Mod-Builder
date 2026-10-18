@@ -1,6 +1,7 @@
 package sheepfromheaven.screenspec.runtime.entity;
 
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.AnimationState;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -27,6 +28,12 @@ public class SpecMob extends PathfinderMob implements SpecEntity {
     @Override
     public boolean doHurtTarget(ServerLevel level, Entity target) {
         return SpecEntityLogic.doHurtTarget(this, spec, level, target);
+    }
+
+    @Override
+    protected void actuallyHurt(ServerLevel level, DamageSource source, float amount) {
+        super.actuallyHurt(level, source, amount);
+        SpecEntityLogic.dropOnHurt(this, spec, level, source);
     }
 
     @Override

@@ -1,5 +1,6 @@
 package sheepfromheaven.screenspec.runtime.entity;
 
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -19,10 +20,11 @@ import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 
 /**
  * Behaviour shared by {@link SpecMob} and {@link SpecMonster}: AI goals per {@code behavior},
- * melee attacks dealing the spec's damage type, and the client-side animation states.
+ * melee attacks dealing the spec's damage type, drops when hurt, and the client-side animation states.
  */
 final class SpecEntityLogic {
     /** entity event id broadcast when a melee hit lands — starts the attack animation client-side */
@@ -80,6 +82,23 @@ final class SpecEntityLogic {
             level.broadcastEntityEvent(mob, ATTACK_EVENT);
         }
         return hurt;
+    }
+
+    /** After damage was applied: rolls each of the spec's hurt drops (like a sheep shedding wool). */
+    static void dropOnHurt(Mob mob, EntitySpec spec, ServerLevel level, DamageSource source) {
+        if (spec.hurtDrops == null || spec.hurtDrops.isEmpty()) return;
+        for (EntitySpec.HurtDrop drop : spec.hurtDrops) {
+            if (drop == null || drop.item == null) continue;
+            if (drop.playerOnly && !(source.getEntity() instanceof Player)) continue;
+            if (mob.getRandom().nextDouble() >= drop.chance) continue;
+            Identifier id = Identifier.tryParse(drop.item);
+            if (id == null) continue;
+            BuiltInRegistries.ITEM.getOptional(id).ifPresent(item -> {
+                int min = Math.max(1, drop.min);
+                int count = min + (drop.max > min ? mob.getRandom().nextInt(drop.max - min + 1) : 0);
+                mob.spawnAtLocation(level, new ItemStack(item, count));
+            });
+        }
     }
 
     /** Client tick: idle plays while standing still (and loops if the animation does). */

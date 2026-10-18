@@ -52,7 +52,17 @@ export async function seedTextures(page: Page): Promise<void> {
  * Seeds localStorage with a single project ("e2e") containing the given
  * screen, so /editor/e2e loads directly into it. Call before navigating.
  */
+/**
+ * E2E runs in local mode, as without a configured accounts database: the AuthGate's login screen
+ * would otherwise sit in front of every page whenever the dev server has MySQL set up.
+ * (tests/e2e/accounts.spec.ts tests the logged-in mode and doesn't call this.)
+ */
+export async function localMode(page: Page): Promise<void> {
+  await page.route("**/api/auth/me", (route) => route.fulfill({ json: { enabled: false, user: null } }));
+}
+
 export async function seedProject(page: Page, screen: ScreenSpec, projectKey = "e2e"): Promise<void> {
+  await localMode(page);
   await page.addInitScript(
     ({ screen, projectKey }) => {
       const session = {
@@ -86,6 +96,7 @@ export async function seedProject(page: Page, screen: ScreenSpec, projectKey = "
  * geometry deterministic for screenshots.
  */
 export async function openEditor(page: Page, projectKey = "e2e"): Promise<void> {
+  await localMode(page);
   await page.goto(`/editor/${projectKey}`);
   await page.evaluate(() => (window as unknown as { __seedTexturesPromise: Promise<void> }).__seedTexturesPromise);
   await page.reload();
@@ -170,6 +181,7 @@ interface HarnessOptions {
  */
 export async function openWidgetHarness(page: Page, opts: HarnessOptions): Promise<void> {
   const id = opts.widget.id ?? `${opts.widget.type}_${++widgetIdCounter}`;
+  await localMode(page);
   await seedTextures(page);
   await page.addInitScript((config) => {
     (window as unknown as { __HARNESS_WIDGET__: unknown }).__HARNESS_WIDGET__ = config;

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import * as THREE from "three";
 import { templateModel, packUv, mirrorTarget, deleteTargets, editTarget, addCubes, generateAnimation, findBone, findCube, describeModel } from "@/lib/model3d/aiOps";
 import { cubeSize } from "@/lib/model3d/geometry";
 import { javaParts } from "@/lib/model3d/codecs";
@@ -57,5 +58,18 @@ describe("AI model ops", () => {
     expect(l).toBe(-r);
     expect(Math.abs(l)).toBeGreaterThan(20);
     expect(describeModel({ ...m, animations: [walk] }).animations).toHaveLength(1);
+  });
+
+  it("attacks towards the face (north, -Z), the same way the viewport renders it", () => {
+    const m = templateModel("humanoid");
+    const attack = generateAnimation(m, "attack");
+    // Where a direction ends up after a keyframe rotation, applied like ModelViewport does (ZYX, degrees).
+    const turn = (rot: number[], dir: [number, number, number]) =>
+      new THREE.Vector3(...dir).applyEuler(new THREE.Euler(rot[0] * Math.PI / 180, rot[1] * Math.PI / 180, rot[2] * Math.PI / 180, "ZYX"));
+    const peak = (bone: string) => attack.bones[findBone(m, bone)!.id].rotation.reduce((a, k) => (Math.abs(k.value[0]) > Math.abs(a.value[0]) ? k : a)).value;
+    for (const arm of ["left_arm", "right_arm"]) expect(turn(peak(arm), [0, -1, 0]).z).toBeLessThan(-0.5); // hanging arm swings forward
+    expect(turn(peak("head"), [0, 0, -1]).y).toBeLessThan(0); // head dips
+    const lunge = attack.bones[findBone(m, "body")!.id].position.map((k) => k.value[2]);
+    expect(Math.min(...lunge)).toBeLessThan(0); // body lunges forward
   });
 });

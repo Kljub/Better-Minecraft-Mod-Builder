@@ -1,3 +1,5 @@
+import { cloudDeleteFile, cloudPutFile } from "@/lib/cloud/sync";
+
 const DB_NAME = "mc-ui-builder";
 const STORE = "textures";
 const DB_VERSION = 1;
@@ -17,7 +19,11 @@ export async function saveTexture(name: string, blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).put(blob, name);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      // Only the user's own textures go to the account; extracted vanilla/pack files stay local.
+      if (name.startsWith("pack:custom/")) cloudPutFile("texture", name.slice(5), blob);
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
   });
 }
@@ -46,7 +52,10 @@ export async function deleteTexture(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
     tx.objectStore(STORE).delete(name);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      if (name.startsWith("pack:custom/")) cloudDeleteFile("texture", name.slice(5));
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
   });
 }

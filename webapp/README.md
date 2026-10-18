@@ -23,8 +23,10 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 ## Item Skin Generator
 
 The "Item Skin Generator" rail entry makes 16×16 item textures (from text, a base texture or as a
-material set), seamless 16×16 block textures and 64×64 player skins with a 3D preview. Results go into
-Resources and can be applied straight to an item or block. Models and licences:
+material set) and 64×64 player skins with a 3D preview; the "Block Generator" entry makes block textures
+from 16×16 up to 256×256 (seamless); the "Armor Generator" entry makes whole armor sets (both worn body
+layers + four icons) previewed on a 3D player. Results go into Resources and can be applied straight to an
+item, block or armor set. Models and licences:
 `tools/skin-generator/README.md`. `app/api/skin/generate` runs them on one of two backends, picked in the
 tab (block textures and player skins are local only):
 

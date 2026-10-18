@@ -24,8 +24,9 @@ const nextConfig: NextConfig = {
   // during Playwright runs so it can't leak into visual regression snapshots.
   ...(process.env.PLAYWRIGHT_TEST ? { devIndicators: false } : {}),
   // In sandbox environments (e.g. super.engineering) the project root may be
-  // read-only, causing Turbopack panics. Write dev chunks to /tmp instead.
-  ...(process.env.NODE_ENV !== "production" ? { distDir: "/tmp/next-dist-mc-ui-builder" } : {}),
+  // read-only, causing Turbopack panics. Write dev chunks to /tmp instead (a separate dir for the
+  // Playwright dev server so it can run next to the normal one).
+  ...(process.env.NODE_ENV !== "production" ? { distDir: `/tmp/next-dist-mc-ui-builder${process.env.PLAYWRIGHT_TEST ? "-pw" : ""}` } : {}),
 };
 
 export default nextConfig;

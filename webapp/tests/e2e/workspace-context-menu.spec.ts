@@ -33,3 +33,31 @@ test("right-click a tile in All categories to rename and delete it", async ({ pa
   await menu.getByRole("menuitem", { name: "Delete" }).click();
   await expect(overview.getByText("heal", { exact: true })).toBeHidden();
 });
+
+test("right-click a custom texture in All categories to rename and delete it", async ({ page }) => {
+  await seedTextures(page);
+  // one custom image, as if uploaded in the Resources tab (1×1 PNG)
+  await page.addInitScript(() => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const req = indexedDB.open("mc-ui-builder", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("textures");
+    req.onsuccess = () => req.result.transaction("textures", "readwrite").objectStore("textures").put(new Blob([png], { type: "image/png" }), "pack:custom/ruby_gem.png");
+  });
+  await seedProject(page, { id: "main", width: 320, height: 180, modId: "mymod", widgets: [] });
+  await openEditor(page);
+
+  await page.getByTitle("All categories", { exact: true }).click();
+  const overview = page.getByTestId("workspace-overview");
+  const menu = page.getByTestId("workspace-context-menu");
+
+  await overview.getByText("ruby_gem", { exact: true }).click({ button: "right" });
+  await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeEnabled();
+  page.once("dialog", (d) => d.accept("emerald_gem"));
+  await menu.getByRole("menuitem", { name: "Rename" }).click();
+  await expect(overview.getByText("emerald_gem", { exact: true })).toBeVisible();
+
+  page.once("dialog", (d) => d.accept());
+  await overview.getByText("emerald_gem", { exact: true }).click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(overview.getByText("emerald_gem", { exact: true })).toBeHidden();
+});

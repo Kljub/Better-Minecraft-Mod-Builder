@@ -20,6 +20,9 @@ public final class ArmorSpec {
      * already copies it to the equipment-asset texture paths this spec's generated {@code
      * assets/<modId>/equipment/<id>.json} references. */
     public String equipmentTexture;
+    /** Optional separate leggings-layer texture (vanilla's layer_2) — informational here too; when
+     * empty the export reuses {@link #equipmentTexture} for the leggings layer. */
+    public String equipmentLeggingsTexture;
     /** Base durability unit — actual max damage is {@code durability * ArmorType.unitDurability}. */
     public int durability = 15;
     public int defenseHelmet;
@@ -34,4 +37,26 @@ public final class ArmorSpec {
     public String creativeTab = "custom";
     /** {@code "common" | "uncommon" | "rare" | "epic"} */
     public String rarity = "common";
+    /**
+     * Optional custom 3D model (webapp: Armor → "3D model"), already in Java model space. Top-level
+     * parts named like ArmorModelAPI's bones (armorHead, armorBody, …) are listed in {@code anchors}
+     * with the vanilla body part they follow and the piece that draws them. Null = vanilla armor layer.
+     */
+    public CustomModel customModel;
+
+    public static class CustomModel {
+        /** path under assets/<modid>/, e.g. "textures/armor/ruby.png" */
+        public String texture;
+        public int textureWidth = 64;
+        public int textureHeight = 64;
+        public java.util.List<sheepfromheaven.screenspec.runtime.entity.EntitySpec.Part> parts = new java.util.ArrayList<>();
+        public java.util.Map<String, Anchor> anchors = new java.util.HashMap<>();
+    }
+
+    public static class Anchor {
+        /** head | body | right_arm | left_arm | right_leg | left_leg */
+        public String anchor;
+        /** head | chest | legs | feet */
+        public String slot;
+    }
 }

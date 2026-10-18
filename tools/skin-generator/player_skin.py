@@ -15,6 +15,8 @@ The SDXL pipeline (~7 GB in fp16) is loaded on first use, with CPU offload on CU
 to the item model on a 12 GB card.
 """
 
+import threading
+
 import numpy as np
 import torch
 from PIL import Image
@@ -39,21 +41,33 @@ LEGACY_COPIES = [
 ]
 
 _pipe = None
+_lock = threading.Lock()
+
+
+def _load_once(device, dtype):
+    from diffusers import StableDiffusionXLPipeline
+    print(f"Loading {MODEL} ...", flush=True)
+    pipe = StableDiffusionXLPipeline.from_pretrained(MODEL, torch_dtype=dtype)
+    pipe.vae.config.force_upcast = True  # fp16 SDXL VAE can decode to NaN (black images)
+    pipe.set_progress_bar_config(disable=True)
+    if device == "cuda":
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe = pipe.to(device)
+    return pipe
 
 
 def _load(device, dtype):
     global _pipe
-    if _pipe is None:
-        from diffusers import StableDiffusionXLPipeline
-        print(f"Loading {MODEL} ...", flush=True)
-        pipe = StableDiffusionXLPipeline.from_pretrained(MODEL, torch_dtype=dtype)
-        pipe.vae.config.force_upcast = True  # fp16 SDXL VAE can decode to NaN (black images)
-        pipe.set_progress_bar_config(disable=True)
-        if device == "cuda":
-            pipe.enable_model_cpu_offload()
-        else:
-            pipe = pipe.to(device)
-        _pipe = pipe
+    with _lock:
+        if _pipe is None:
+            try:
+                _pipe = _load_once(device, dtype)
+            except NotImplementedError as e:
+                # Seen once in the server (never standalone): a text encoder came back with weights
+                # still on the "meta" device and offloading failed. A fresh load worked.
+                print(f"SDXL load failed ({e}); retrying once", flush=True)
+                _pipe = _load_once(device, dtype)
     return _pipe
 
 

@@ -109,7 +109,7 @@ type Tab = "design" | "animation" | "skin" | "settings";
  * Imports .bbmodel / geo.json / animation.json; exports .bbmodel, geo.json, animation.json and
  * Java model + animation classes for the project's Minecraft version.
  */
-export default function ModelEditor({ id, model, modId, mcVersion, onChange, settings, onSettingsChange, fieldCtx, onExportBedrockAddon, onRename }: {
+export default function ModelEditor({ id, model, modId, mcVersion, onChange, settings, onSettingsChange, fieldCtx, onExportBedrockAddon, onRename, variant = "entity" }: {
   id: string;
   model: EntityModel;
   modId: string;
@@ -122,6 +122,8 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
   onRename?: (id: string) => boolean;
   /** builds and downloads a Bedrock .mcaddon with this entity, or every entity of the project */
   onExportBedrockAddon?: (scope: "this" | "all") => void;
+  /** "armor": a custom armor model — Design + Skin only, a see-through player to fit it to, ArmorModelAPI export */
+  variant?: "entity" | "armor";
 }) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [tab, setTab] = useState<Tab>("design");
@@ -204,7 +206,8 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
   const animsRef = useRef(animations);
   useEffect(() => { animsRef.current = animations; });
   useEffect(() => registerModelEditor({
-    modelId: id,
+    // armor models live next to entity models of the same name — keep their AI handles apart
+    modelId: variant === "armor" ? `armor:${id}` : id,
     screenshot: () => viewport.current?.screenshot() ?? "",
     setView: (v) => viewport.current?.setView(v as ViewPreset),
     setTab: (t) => { if (t === "design" || t === "animation" || t === "skin" || t === "settings") { setTab(t); setPlaying(false); } },
@@ -217,7 +220,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
       setAnimId(a.id);
       setTime(Math.max(0, t));
     },
-  }), [id]);
+  }), [id, variant]);
 
   // Pose the viewport for the animation tab; rest pose elsewhere.
   useEffect(() => {
@@ -409,9 +412,9 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
         <ModelNameField id={id} modId={modId} onRename={onRename} />
         <div className="mx-1 h-4 w-px shrink-0 bg-border" />
         {tabBtn("design", PenTool, "Design")}
-        {tabBtn("animation", Clapperboard, "Animation")}
+        {variant === "entity" && tabBtn("animation", Clapperboard, "Animation")}
         {tabBtn("skin", Palette, "Skin")}
-        {tabBtn("settings", SlidersHorizontal, "Settings")}
+        {variant === "entity" && tabBtn("settings", SlidersHorizontal, "Settings")}
         <div className="mx-1 h-4 w-px bg-border" />
         {tab === "design" && (
           <>
@@ -455,7 +458,8 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
                 <DropdownMenuItem key={f} onClick={() => exportBbmodel(f)}>Blockbench .bbmodel — {BBMODEL_FORMATS[f]}</DropdownMenuItem>
               ))}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => download(JSON.stringify(toBedrockGeo(sanitizeBoneNames(model), { identifier: id }), null, 2), `${id}.geo.json`)}>Bedrock / GeckoLib .geo.json</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => download(JSON.stringify(toBedrockGeo(sanitizeBoneNames(model), { identifier: id }), null, 2), `${id}.geo.json`)}>{variant === "armor" ? "ArmorModelAPI / GeckoLib .geo.json" : "Bedrock / GeckoLib .geo.json"}</DropdownMenuItem>
+              {variant === "entity" && (<>
               <DropdownMenuItem disabled={!animations.length} onClick={() => download(JSON.stringify(toBedrockAnimations(sanitizeBoneNames(model), animations, id), null, 2), `${id}.animation.json`)}>Bedrock / GeckoLib .animation.json</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => download(toJavaModel(sanitizeBoneNames(model), { className: `${pascal(id)}Model`, modId, layer: id, mcVersion }), `${pascal(id)}Model.java`, "text/x-java")}>
@@ -464,6 +468,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
               <DropdownMenuItem disabled={!animations.length} onClick={() => download(toJavaAnimations(sanitizeBoneNames(model), animations, `${pascal(id)}Animations`), `${pascal(id)}Animations.java`, "text/x-java")}>
                 <FileCode2 className="mr-2 h-3.5 w-3.5" />Java animations class
               </DropdownMenuItem>
+              </>)}
               {onExportBedrockAddon && (
                 <>
                   <DropdownMenuSeparator />
@@ -549,6 +554,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
                 onSelect={select}
                 onTransformEnd={onTransformEnd}
                 onContextMenu={openMenu}
+                reference={variant === "armor" ? "player" : undefined}
               />
             </div>
             {tab === "animation" && (

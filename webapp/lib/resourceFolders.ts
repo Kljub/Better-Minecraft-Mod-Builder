@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { cloudPutSetting } from "@/lib/cloud/sync";
 
 /**
  * Folders for the Resources tab. Folders are pure organisation metadata — a
@@ -43,6 +44,7 @@ function load(): ResourceFolderState {
 function set(next: ResourceFolderState) {
   state = next;
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch { /* storage unavailable — keep in memory */ }
+  cloudPutSetting("resource-folders", next);
   listeners.forEach((l) => l());
 }
 

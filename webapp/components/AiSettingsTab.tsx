@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import AiAccountsPanel from "@/components/AiAccountsPanel";
 import {
   AI_CLIENTS, setAiClient, setAiPreferred, useAiSettings, enabledAiClients, aiClientLabel, fetchAiStatus,
   type AiCliStatus, type AiClientId,
@@ -93,6 +94,11 @@ export default function AiSettingsTab() {
             {checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Check"}
           </Button>
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Accounts</p>
+        <AiAccountsPanel />
       </section>
 
       {enabled.length > 1 && (

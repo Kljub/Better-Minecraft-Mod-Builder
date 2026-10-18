@@ -4,7 +4,7 @@ import { emptyModel } from "@/lib/model3d/geometry";
 import { javaParts } from "@/lib/model3d/codecs";
 import { javaAnimations } from "@/lib/model3d/animation";
 import type { EntityModel } from "@/lib/model3d/types";
-import { defaultEntitySettings } from "./entitySettings";
+import { defaultEntitySettings, deathDrops, hurtDrops, javaLootTable } from "./entitySettings";
 import { spawnEggPng } from "@/lib/png";
 
 /**
@@ -45,6 +45,9 @@ export const ENTITY_MODEL: ElementKindDef = {
     if (!model.cubes.length) problems.push("The model has no cubes.");
     if (model.cubes.some((c) => !c.boxUv)) problems.push("Java entity models only support box UV — cubes with per-face UV use their UV offset instead.");
     const names = new Set((model.animations ?? []).map((a) => a.name));
+    for (const d of [...deathDrops(s), ...hurtDrops(s)]) {
+      if (!/^[a-z0-9_.-]+:[a-z0-9_./-]+$/.test(d.item)) problems.push(`Drop "${d.item}" isn't a valid item id (namespace:item).`);
+    }
     for (const k of ["idleAnimation", "walkAnimation", "attackAnimation"]) {
       const n = settingStr(s, k);
       if (n && !names.has(n)) problems.push(`Settings → ${titleCase(k.replace("Animation", ""))} animation "${n}" doesn't exist.`);
@@ -64,6 +67,9 @@ export const ENTITY_MODEL: ElementKindDef = {
       const png = spawnEggPng(settingStr(s, "eggPrimary") || "#5a8f3c", settingStr(s, "eggSecondary") || "#2d4a1e");
       out.push({ path: `assets/${modId}/textures/item/${egg}.png`, content: new Blob([png as BlobPart], { type: "image/png" }) });
     }
+    const drops = deathDrops(s);
+    // Always written (even empty): it's the EntityType's default loot table, so a stale one never lingers.
+    out.push({ path: `data/${modId}/loot_table/entities/${spec.id}.json`, content: json(javaLootTable(drops, modId, spec.id, mcVersion)) });
     if (s.naturalSpawn === true) {
       out.push({
         path: `data/${modId}/neoforge/biome_modifier/${spec.id}_spawns.json`,
@@ -117,6 +123,7 @@ export const ENTITY_MODEL: ElementKindDef = {
           idleAnimation: settingStr(s, "idleAnimation"),
           walkAnimation: settingStr(s, "walkAnimation"),
           attackAnimation: settingStr(s, "attackAnimation"),
+          hurtDrops: hurtDrops(s),
         },
       },
     };

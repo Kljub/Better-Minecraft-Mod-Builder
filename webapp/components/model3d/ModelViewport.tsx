@@ -136,6 +136,32 @@ function poseBones(built: Built, pose: Map<string, BonePose> | null) {
   }
 }
 
+/** Steve-sized boxes (vanilla player skeleton, +X = his right) drawn see-through, for fitting armor. */
+function playerMannequin(): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "reference";
+  const mat = new THREE.MeshBasicMaterial({ color: 0x9aa7b8, transparent: true, opacity: 0.18, depthWrite: false });
+  const edge = new THREE.LineBasicMaterial({ color: 0x9aa7b8, transparent: true, opacity: 0.45 });
+  const box = (from: Vec3, to: Vec3) => {
+    const geo = new THREE.BoxGeometry(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set((from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2);
+    mesh.renderOrder = -1;
+    mesh.raycast = () => {};
+    const lines = new THREE.LineSegments(new THREE.EdgesGeometry(geo), edge);
+    lines.raycast = () => {};
+    mesh.add(lines);
+    group.add(mesh);
+  };
+  box([-4, 24, -4], [4, 32, 4]);
+  box([-4, 12, -2], [4, 24, 2]);
+  box([4, 12, -2], [8, 24, 2]);
+  box([-8, 12, -2], [-4, 24, 2]);
+  box([-0.1, 0, -2], [3.9, 12, 2]);
+  box([-3.9, 0, -2], [0.1, 12, 2]);
+  return group;
+}
+
 const ModelViewport = forwardRef<ModelViewportHandle, {
   model: EntityModel;
   textureUrl?: string;
@@ -154,7 +180,9 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
   textureCanvas?: HTMLCanvasElement | null;
   /** bump after drawing on textureCanvas to upload it to the GPU */
   textureVersion?: number;
-}>(function ModelViewport({ model, textureUrl, selection, mode, snap, rotationSnap, onSelect, onTransformEnd, onContextMenu, onPaint, textureCanvas, textureVersion }, ref) {
+  /** "player": a see-through player body to model armor around (not pickable) */
+  reference?: "player";
+}>(function ModelViewport({ model, textureUrl, selection, mode, snap, rotationSnap, onSelect, onTransformEnd, onContextMenu, onPaint, textureCanvas, textureVersion, reference }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [gpu, setGpu] = useState<{ name: string; software: boolean } | null>(null);
   const three = useRef<{
@@ -404,6 +432,16 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
     t.scene.add(t.built.root);
     t.requestRender();
   }, [model]);
+
+  // ── reference mannequin (armor) ──
+  useEffect(() => {
+    const t = three.current;
+    if (!t || reference !== "player") return;
+    const group = playerMannequin();
+    t.scene.add(group);
+    t.requestRender();
+    return () => { t.scene.remove(group); disposeTree(group); t.requestRender(); };
+  }, [reference]);
 
   // ── selection outline + gizmo ──
   useEffect(() => {

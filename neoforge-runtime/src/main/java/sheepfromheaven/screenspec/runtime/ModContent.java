@@ -101,6 +101,9 @@ public final class ModContent {
         Map<String, DeferredItem<Item>> registeredItems = ItemSpecs.registerAll(itemRegister, items, modId, registeredAttributes);
         Map<String, DeferredBlock<Block>> registeredBlocks = BlockSpecs.registerAll(blockRegister, itemRegister, blocks);
         Map<String, DeferredItem<Item>> registeredArmorPieces = ArmorSpecs.registerAll(armorRegister, armors, modId);
+        if (net.neoforged.fml.loading.FMLEnvironment.getDist() == net.neoforged.api.distmarker.Dist.CLIENT) {
+            sheepfromheaven.screenspec.runtime.armor.client.ArmorModelsClient.register(modId, modBus, armors, registeredArmorPieces);
+        }
 
         itemRegister.register(modBus);
         blockRegister.register(modBus);

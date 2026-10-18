@@ -58,4 +58,8 @@ describe("Bedrock add-on", () => {
     expect(bp.header.uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(await zip.file("MyMod_RP/texts/en_US.lang")!.async("string")).toContain("entity.mymod:gnawer.name=Rail Gnawer");
   });
+  it("adds a loot table for vanilla death drops", () => {
+    const e = behaviorEntity("mymod", spec({ drops: [{ item: "minecraft:bone", min: 0, max: 2, chance: 1, lootingBonus: 1 }, { item: "mymod:ruby", min: 1, max: 1, chance: 1 }] })) as { "minecraft:entity": { components: Record<string, unknown> } };
+    expect(e["minecraft:entity"].components["minecraft:loot"]).toEqual({ table: "loot_tables/entities/gnawer.json" });
+  });
 });
