@@ -1,5 +1,5 @@
 import type JSZip from "jszip";
-import type { ElementsByKind, ExportContext } from "./types";
+import type { ElementKindDef, ElementSpec, ElementsByKind, ExportContext } from "./types";
 import { ELEMENT_KINDS } from "./registry";
 
 /**
@@ -15,7 +15,9 @@ export function writeElementFiles(zip: JSZip, prefix: string, elements: Elements
   const tags = new Map<string, Set<string>>();
   const manifests = new Map<string, unknown[]>();
   const atlases = new Map<string, unknown[]>();
+  const merged = new Map<string, Record<string, unknown>>();
   for (const def of ELEMENT_KINDS) {
+    if (def.standalone) continue; // e.g. resource packs — downloaded on their own, not part of the mod
     for (const spec of elements[def.kind] ?? []) {
       for (const f of def.files(spec, ctx)) zip.file(`${prefix}${f.path}`, f.content);
       const shared = def.shared?.(spec, { modId: ctx.modId, mcVersion: ctx.mcVersion });
@@ -31,8 +33,12 @@ export function writeElementFiles(zip: JSZip, prefix: string, elements: Elements
       for (const [atlas, sources] of Object.entries(shared?.atlases ?? {})) {
         atlases.set(atlas, [...(atlases.get(atlas) ?? []), ...sources]);
       }
+      for (const [path, entries] of Object.entries(shared?.jsonMerge ?? {})) {
+        merged.set(path, { ...(merged.get(path) ?? {}), ...entries });
+      }
     }
   }
+  for (const [path, obj] of merged) zip.file(`${prefix}${path}`, JSON.stringify(obj, null, 2));
   if (Object.keys(lang).length > 0) {
     const sorted = Object.fromEntries(Object.entries(lang).sort(([a], [b]) => a.localeCompare(b)));
     zip.file(`${prefix}assets/${ctx.modId}/lang/en_us.json`, JSON.stringify(sorted, null, 2));
@@ -62,6 +68,14 @@ export function writeElementArchiveCopies(zip: JSZip, prefix: string, elements: 
 
 export function hasElements(elements: ElementsByKind | undefined): boolean {
   return !!elements && Object.values(elements).some((l) => l.length > 0);
+}
+
+/** Zip of one standalone element's own files (ElementKindDef.download), e.g. a resource pack. */
+export async function buildStandaloneZip(def: ElementKindDef, spec: ElementSpec, ctx: ExportContext): Promise<Blob> {
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+  for (const f of def.files(spec, ctx)) zip.file(f.path, f.content);
+  return zip.generateAsync({ type: "blob" });
 }
 
 /** Every structure-store key the elements reference (to preload blobs before writing). */

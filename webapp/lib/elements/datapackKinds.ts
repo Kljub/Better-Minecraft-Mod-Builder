@@ -169,7 +169,7 @@ export const ENCHANTMENT: ElementKindDef = {
         { key: "kind", label: "Effect", type: "select", options: EFFECT_KINDS },
         { key: "base", label: "Amount at level I", type: "number", half: true },
         { key: "perLevel", label: "… added per extra level", type: "number", half: true },
-        { key: "attribute", label: "Attribute", type: "select", half: true, options: opts(ATTRIBUTES, Object.fromEntries(ATTRIBUTES.map((a) => [a, titleCase(a)]))), when: (e) => e.kind === "attribute" },
+        { key: "attribute", label: "Attribute", type: "select", half: true, options: opts(ATTRIBUTES, Object.fromEntries(ATTRIBUTES.map((a) => [a, `minecraft:${a}`]))), when: (e) => e.kind === "attribute" },
         { key: "operation", label: "Operation", type: "select", half: true, when: (e) => e.kind === "attribute", options: opts(["add_value", "add_multiplied_base", "add_multiplied_total"], { add_value: "Add", add_multiplied_base: "Add × base (%)", add_multiplied_total: "Multiply total (%)" }) },
       ],
     },
@@ -377,11 +377,11 @@ export const FEATURE: ElementKindDef = {
   }),
   fields: [
     {
-      key: "block", label: "Ore block", type: "registry", half: true, placeholder: "mymod:ruby_ore",
+      key: "block", label: "Ore block", type: "registry", itemKind: "block", half: true, placeholder: "mymod:ruby_ore",
       suggestions: (ctx) => [...ctx.projectBlocks, "minecraft:diamond_ore", "minecraft:iron_ore", "minecraft:stone"],
     },
     {
-      key: "deepslateBlock", label: "Deepslate variant (optional)", type: "registry", half: true, placeholder: "mymod:deepslate_ruby_ore",
+      key: "deepslateBlock", label: "Deepslate variant (optional)", type: "registry", itemKind: "block", half: true, placeholder: "mymod:deepslate_ruby_ore",
       suggestions: (ctx) => ctx.projectBlocks, when: (s) => s.host === "overworld",
       help: "Placed where the vein runs through deepslate. Empty = same block.",
     },

@@ -10,7 +10,10 @@ import { saveTexture } from "@/lib/textureStore";
 import { boxUvRects, cubeSize, effectiveFaceUvs } from "@/lib/model3d/geometry";
 import { FACE_KEYS, type EntityModel, type FaceKey } from "@/lib/model3d/types";
 import { hitTestUv, moveUv, toPerFaceUv, toBoxUv, shareFaceOnAllSides, targetRects, type UvTarget } from "@/lib/model3d/uvEdit";
-import { paintCubes } from "@/lib/ai/texturePaint";
+import { paintCubes, paintFace } from "@/lib/ai/texturePaint";
+import { findCube } from "@/lib/model3d/aiOps";
+import { clipOps, type AiSkin } from "@/lib/model3d/aiSkin";
+import SkinAiBar from "./SkinAiBar";
 
 type Tool = "pencil" | "eraser" | "fill" | "picker" | "uv";
 
@@ -232,6 +235,34 @@ export default function SkinPainter({ modelId, model, onChange }: {
     img.onload = () => { ctx().clearRect(0, 0, W, H); ctx().drawImage(img, 0, 0); setVersion((v) => v + 1); scheduleSave(); };
     img.src = URL.createObjectURL(blob);
   };
+  /** Paints an AI skin answer: palette with shading first, then face details — one undo step. */
+  const applyAiSkin = async (skin: AiSkin) => {
+    let blob = await paintCubes(model, { defaultColor: skin.default_color, colors: Object.fromEntries(skin.parts.map((p) => [p.name, p.color])), noise: skin.noise }, canvasRef.current?.toDataURL());
+    let skipped = 0;
+    for (const f of skin.faces) {
+      const cube = findCube(model, f.cube);
+      if (!cube) { skipped++; continue; }
+      const [u1, v1, u2, v2] = effectiveFaceUvs(cube)[f.face];
+      const size: [number, number] = [Math.ceil(Math.max(u1, u2)) - Math.floor(Math.min(u1, u2)), Math.ceil(Math.max(v1, v2)) - Math.floor(Math.min(v1, v2))];
+      if (size[0] <= 0 || size[1] <= 0) { skipped++; continue; }
+      const url = URL.createObjectURL(blob);
+      try {
+        blob = await paintFace(model, cube.id, f.face, f.color || undefined, clipOps(f.ops, size), url);
+      } catch {
+        skipped++;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    await new Promise<void>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { snapshot(); ctx().clearRect(0, 0, W, H); ctx().drawImage(img, 0, 0); setVersion((v) => v + 1); scheduleSave(); URL.revokeObjectURL(url); resolve(); };
+      img.onerror = () => reject(new Error("Couldn't draw the painted texture."));
+      img.src = url;
+    });
+    toast.success(`Skin painted: ${skin.parts.length} colours, ${skin.faces.length - skipped} face details${skipped ? ` (${skipped} skipped — unknown cube/face)` : ""}. Ctrl+Z undoes it.`);
+  };
   const clearAll = () => { snapshot(); ctx().clearRect(0, 0, W, H); setVersion((v) => v + 1); scheduleSave(); };
   const importImage = (file: File) => {
     const img = new Image();
@@ -293,6 +324,7 @@ export default function SkinPainter({ modelId, model, onChange }: {
         <Button variant="secondary" size="sm" className="h-7 justify-start gap-1.5 text-xs" onClick={clearAll}>
           <FilePlus2 className="h-3.5 w-3.5" /> Clear texture
         </Button>
+        <SkinAiBar model={model} onApply={applyAiSkin} />
         {tool === "uv" && (
           <div className="flex flex-col gap-2 rounded-sm border border-input/70 p-2" data-testid="uv-panel">
             <div className="font-semibold uppercase tracking-wide text-muted-foreground">UV areas</div>

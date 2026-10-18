@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import TexturePickerModal from "@/components/TexturePickerModal";
+import TemplateTextureDialog from "@/components/TemplateTextureDialog";
 import { useTextures } from "@/lib/TextureContext";
 import { Field, NumInput } from "@/components/SchemaFields";
 import {
   Eraser, Paintbrush, Trash2, ImageDown, Droplet, ArrowLeft,
   Slash, Square, Circle, PaintBucket, Plus, Eye, EyeOff, ChevronUp, ChevronDown, Undo2, Redo2, Upload,
   MousePointer2, Check, Wand2,
+  Layers3,
 } from "lucide-react";
 
 const MIN_SIZE = 16;
@@ -230,6 +232,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
   const [bgTolerance, setBgTolerance] = useState(20);
   const [saving, setSaving] = useState(false);
   const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
 
   const [layers, setLayers] = useState<LayerMeta[]>(() => [newLayerMeta("Layer 1")]);
   const [activeLayerIdx, setActiveLayerIdx] = useState(0);
@@ -823,6 +826,39 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     redraw();
   };
 
+  /** "From template": the generated layers go on top as new layers (one undo step). */
+  const addTemplateLayers = (created: { name: string; image: ImageData }[]) => {
+    const snap = captureSnapshot();
+    pushUndoSnapshot();
+    const metas = created.map((c) => newLayerMeta(c.name));
+    // On a blank texture the template replaces the empty starting layer(s) — an empty layer left
+    // underneath an opaque template base would swallow everything painted on it.
+    const blank = Object.values(snap.images).every((img) => !img.data.some((v, i) => i % 4 === 3 && v > 0));
+    const kept = blank ? [] : layers;
+    schedulePendingRestore({ ...(blank ? {} : snap.images), ...Object.fromEntries(metas.map((m, i) => [m.id, created[i].image])) });
+    setLayers([...kept, ...metas]);
+    setActiveLayerIdx(kept.length + metas.length - 1);
+  };
+
+  /** Why a stroke at (x, y) wouldn't show: the active layer is hidden, or a visible layer above is opaque there. */
+  const [paintHint, setPaintHint] = useState<{ text: string; selectIdx?: number } | null>(null);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function checkPaintVisible(x: number, y: number) {
+    let hint: { text: string; selectIdx?: number } | null = null;
+    const active = layers[activeLayerIdx];
+    if (active && !active.visible) hint = { text: `"${active.name}" is hidden — what you paint there isn't shown.` };
+    else {
+      for (let i = layers.length - 1; i > activeLayerIdx; i--) {
+        if (!layers[i].visible) continue;
+        const a = layerCanvasesRef.current[i]?.getContext("2d")?.getImageData(x, y, 1, 1).data[3] ?? 0;
+        if (a === 255) { hint = { text: `You're painting on "${active?.name}", but "${layers[i].name}" above covers this spot.`, selectIdx: i }; break; }
+      }
+    }
+    setPaintHint(hint);
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    if (hint) hintTimer.current = setTimeout(() => setPaintHint(null), 6000);
+  }
+
   const addLayer = () => {
     pushUndoSnapshot();
     setLayers((prev) => [...prev, newLayerMeta(`Layer ${prev.length + 1}`)]);
@@ -1018,6 +1054,13 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
         </Button>
         <Button
           type="button" variant="outline" size="sm" className="h-7 px-2 text-xs gap-1"
+          onClick={() => setTemplateOpen(true)}
+          title="Build a texture from MCreator-style layer templates (tinted, rotated, randomizable)"
+        >
+          <Layers3 className="h-3.5 w-3.5" /> From template
+        </Button>
+        <Button
+          type="button" variant="outline" size="sm" className="h-7 px-2 text-xs gap-1"
           onClick={() => importFileRef.current?.click()}
           title="Import a PNG from your computer onto the active layer, scaled centered to fit the current canvas size"
         >
@@ -1049,7 +1092,20 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
       </div>
 
       <div className="flex flex-1 gap-3 overflow-hidden">
-        <div ref={canvasAreaRef} className="flex min-w-0 min-h-0 flex-1 items-center justify-center overflow-auto rounded border border-input bg-background">
+        <div ref={canvasAreaRef} className="relative flex min-w-0 min-h-0 flex-1 items-center justify-center overflow-auto rounded border border-input bg-background">
+          {paintHint && (
+            <div role="status" data-testid="paint-hint"
+              className="absolute left-1/2 top-2 z-10 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-sm border border-amber-500/60 bg-popover px-3 py-1.5 text-xs shadow">
+              <span>{paintHint.text}</span>
+              {paintHint.selectIdx !== undefined && (
+                <button type="button" className="shrink-0 rounded-sm bg-primary px-2 py-0.5 font-medium text-primary-foreground"
+                  onClick={() => { setActiveLayerIdx(paintHint.selectIdx!); setPaintHint(null); }}>
+                  Select that layer
+                </button>
+              )}
+              <button type="button" aria-label="Dismiss" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setPaintHint(null)}>×</button>
+            </div>
+          )}
           {layers.map((layer, i) => (
             <canvas
               key={layer.id}
@@ -1066,6 +1122,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
             style={{ width: displayW, height: displayH, imageRendering: "pixelated", cursor: "crosshair" }}
             onMouseDown={(e) => {
               const [x, y] = cellFromEvent(e);
+              if (tool !== "select" && tool !== "bgremove") checkPaintVisible(x, y);
               if (tool === "paint" || tool === "erase") {
                 pushUndoSnapshot();
                 paintingRef.current = true;
@@ -1176,7 +1233,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
               </Button>
             </div>
             <div className="flex flex-col gap-0.5">
-              {[...layers].map((layer, displayIdx) => {
+              {[...layers].reverse().map((layer, displayIdx) => {
                 const idx = layers.length - 1 - displayIdx; // top-of-stack shown first
                 return (
                   <div
@@ -1252,6 +1309,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
         </div>
       </div>
 
+      <TemplateTextureDialog open={templateOpen} onOpenChange={setTemplateOpen} width={width} height={height} onCreate={addTemplateLayers} />
       <TexturePickerModal
         open={sourcePickerOpen}
         packTextures={packTextures}

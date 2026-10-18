@@ -60,6 +60,8 @@ public class EntitySpec {
         public String parent;
         public Pose pose = new Pose();
         public List<Cube> cubes = new ArrayList<>();
+        /** Mesh Models: item model id of this part's OBJ mesh ("mymod:mesh/<id>/<part>"), drawn at the part's pose */
+        public String mesh;
     }
 
     public static class Pose {

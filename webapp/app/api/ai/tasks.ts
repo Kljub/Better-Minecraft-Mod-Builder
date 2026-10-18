@@ -1,5 +1,8 @@
 import type { AttributeModifierSpec } from "@/lib/types";
 import { ATTRIBUTE_OPTIONS, ATTRIBUTE_OPERATION_OPTIONS, EQUIPMENT_SLOT_OPTIONS } from "@/lib/itemRegistry";
+import { RIG_SCHEMA, RIG_SYSTEM, rigPrompt, validateAiRig, type RigAiContext } from "@/lib/model3d/aiRig";
+import { SKIN_SCHEMA, SKIN_SYSTEM, skinPrompt, validateAiSkin, type SkinAiContext } from "@/lib/model3d/aiSkin";
+import { ANIMATION_SCHEMA, ANIMATION_SYSTEM, animationPrompt, validateAiAnimation, type AnimationAiContext } from "@/lib/model3d/aiAnimation";
 
 /**
  * AI tasks the editor can request. Each turns the user's free-text request plus editor context
@@ -104,12 +107,18 @@ function attributesTask(rawCtx: unknown): AiTask {
 export function buildTask(task: unknown, context: unknown): AiTask | null {
   switch (task) {
     case "attributes": return attributesTask(context);
+    case "animation": return { system: ANIMATION_SYSTEM, schema: ANIMATION_SCHEMA, validate: validateAiAnimation };
+    case "skin": return { system: SKIN_SYSTEM, schema: SKIN_SCHEMA, validate: validateAiSkin };
+    case "rig": return { system: RIG_SYSTEM, schema: RIG_SCHEMA, validate: validateAiRig };
     default: return null;
   }
 }
 
 /** The user's request, framed with what's being edited. */
 export function buildPrompt(task: string, prompt: string, context: unknown): string {
+  if (task === "animation") return animationPrompt(prompt, sanitizeAnimationContext(context));
+  if (task === "skin") return skinPrompt(prompt, sanitizeSkinContext(context));
+  if (task === "rig") return rigPrompt(prompt, sanitizeRigContext(context));
   const c = (context ?? {}) as Partial<AttributesContext>;
   const about = [
     str(c.name) && `Name: ${str(c.name)}`,
@@ -117,4 +126,49 @@ export function buildPrompt(task: string, prompt: string, context: unknown): str
     str(c.rarity) && `Rarity: ${str(c.rarity)}`,
   ].filter(Boolean).join("\n");
   return `${about ? `Currently editing ${c.target === "effect" ? "an effect" : "an item"}:\n${about}\n\n` : ""}Request (${task}): ${prompt}`;
+}
+
+/** The editor sends the skeleton + animation; keep it to the expected shape and a sane size. */
+function sanitizeAnimationContext(raw: unknown): AnimationAiContext {
+  const c = (raw ?? {}) as Partial<AnimationAiContext>;
+  const vec = (v: unknown) => (Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === "number" && Number.isFinite(n)) ? (v as [number, number, number]) : null);
+  const bones = Array.isArray(c.bones) ? c.bones.slice(0, 128).flatMap((b) => {
+    const name = str(b?.name, 64);
+    return name ? [{ name, parent: str(b.parent, 64) ?? null, pivot: vec(b.pivot) ?? [0, 0, 0] as [number, number, number], size: vec(b.size) }] : [];
+  }) : [];
+  let animation: AnimationAiContext["animation"] = null;
+  try { animation = c.animation ? validateAiAnimation(c.animation) : null; } catch { animation = null; }
+  const others = Array.isArray(c.others) ? c.others.slice(0, 32).flatMap((o) => (str(o, 64) ? [str(o, 64)!] : [])) : [];
+  return { bones, animation, others };
+}
+
+/** The skin tab sends bone/cube names and face sizes; keep that to the expected shape and size. */
+function sanitizeSkinContext(raw: unknown): SkinAiContext {
+  const c = (raw ?? {}) as Partial<SkinAiContext>;
+  const dims = (v: unknown, n: number) => (Array.isArray(v) && v.length === n && v.every((x) => typeof x === "number" && Number.isFinite(x) && Math.abs(x) <= 4096) ? v : null);
+  const bones = Array.isArray(c.bones) ? c.bones.slice(0, 128).flatMap((b) => (str(b?.name, 64) ? [{ name: str(b.name, 64)!, parent: str(b.parent, 64) ?? null }] : [])) : [];
+  const cubes = Array.isArray(c.cubes) ? c.cubes.slice(0, 200).flatMap((cube) => {
+    const name = str(cube?.name, 64);
+    const size = dims(cube?.size, 3) as [number, number, number] | null;
+    if (!name || !size) return [];
+    const faces: SkinAiContext["cubes"][number]["faces"] = {};
+    for (const f of ["north", "east", "south", "west", "up", "down"] as const) {
+      const d = dims((cube.faces as Record<string, unknown> | undefined)?.[f], 2);
+      if (d) faces[f] = d as [number, number];
+    }
+    return [{ name, bone: str(cube.bone, 64) ?? null, size, faces }];
+  }) : [];
+  return { bones, cubes };
+}
+
+/** The mesh model editor sends the model size and its voxel boxes (≤ 400). */
+function sanitizeRigContext(raw: unknown): RigAiContext {
+  const c = (raw ?? {}) as Partial<RigAiContext>;
+  const v3 = (v: unknown) => (Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === "number" && Number.isFinite(x) && Math.abs(x) <= 4096)
+    ? (v.map((x) => Math.round(x * 100) / 100) as [number, number, number]) : null);
+  const boxes = Array.isArray(c.boxes) ? c.boxes.slice(0, 400).flatMap((b) => {
+    const from = v3(b?.from), size = v3(b?.size);
+    return from && size ? [{ from, size }] : [];
+  }) : [];
+  return { size: v3(c.size) ?? [16, 32, 16], boxes };
 }

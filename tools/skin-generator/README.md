@@ -1,7 +1,7 @@
 # Item Skin Generator — local backend
 
 Gradio API on this machine's GPU behind the webapp's **Item Skin Generator** (backend "Local GPU")
-, **Block Generator** and **Armor Generator** tabs.
+, **Block Generator**, **Armor Generator** and **Screen GUI Generator** (SD 1.5 engine) tabs.
 The tab starts/stops it; the item endpoints mirror the public demo Space, so the same webapp code
 drives either.
 
@@ -12,6 +12,7 @@ drives either.
 | Block, engine "lora" | SD 1.5 + [Minecraft Block Texture 1.12](https://civitai.com/models/55824) LoRA | 16–256 (from 512px), not seamless |
 | Block, engine "sd15" | plain SD 1.5 (same pipeline, LoRA off) | 16–256 (from 512px), seamless |
 | Player skin | [monadical-labs/minecraft-skin-generator-sdxl](https://huggingface.co/monadical-labs/minecraft-skin-generator-sdxl) | 64×64 skin |
+| Screen GUI | plain SD 1.5 draws a seamless material; a vanilla-style bevel frame (new panel) or the original GUI's own shading (restyle) is applied in code | any size 16–512 |
 | Armor set | skin model ("knight in full <material> armor") split into vanilla's armor layers + item model for icons | 2× 64×32 layers + 4× 16×16 icons |
 
 Block and player modes are local only. Extra models load on first use: SD 1.5 (~2 GB) + the LoRA
@@ -53,6 +54,7 @@ Gradio call API (`POST /gradio_api/call/<name>` → `event_id`, then `GET …/<e
 - `generate_tier_set(sketch, materials, noun, strength, steps, guidance, seed)`
 - `generate_block(prompt, count, steps, guidance, seed, engine, tileable, size)` — engine `item` (16 only) | `lora` | `sd15`, size 16/32/64/128/256
 - `generate_player_skin(prompt, count, steps, guidance, seed)`
+- `generate_gui(sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate)` — sketch = optional GUI texture to restyle (Gradio Image, kept at its size and alpha)
 - `generate_armor(material, count, steps, guidance, seed)` — files `<material>_<set>_<part>.png`, part = layer1, layer2, helmet, chestplate, leggings, boots
 - `status()` → `{device, model, dtype}`
 
@@ -77,6 +79,11 @@ Each generator returns `[previews, files]`; `files` are the finished PNGs. The s
   a few sets.
 - The very first SDXL load in the server once left a text encoder on the "meta" device (never
   reproduced standalone); `player_skin._load` now locks and retries once.
+
+- GUIs: asked for a GUI layout, SD 1.5 paints game screenshots, and img2img over a flat grey GUI
+  barely changes it — so SD only makes the material and `gui_texture.py` builds the GUI around it.
+  Material quality is hit-and-miss (some seeds come out off-colour); the webapp's Codex engine
+  (`webapp/app/api/gui/codex`, gpt-image via the Codex CLI login) is the better default there.
 
 ## Licences
 

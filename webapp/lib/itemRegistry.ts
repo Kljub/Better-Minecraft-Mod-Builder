@@ -77,6 +77,18 @@ export const ATTRIBUTE_OPTIONS = [
   "generic.luck",
 ] as const;
 
+/**
+ * How attributes are shown in pickers: always with their namespace — vanilla as "minecraft:<name>"
+ * (the stored "generic." prefix is gone in the game's ids since 1.21.2), the project's own custom
+ * attributes as "<modid>:<id> (Display name)".
+ */
+export function attributeLabels(customAttributes: { id: string; displayName: string }[], modId: string): Record<string, string> {
+  return {
+    ...Object.fromEntries(ATTRIBUTE_OPTIONS.map((a) => [a, `minecraft:${a.replace(/^generic\./, "")}`])),
+    ...Object.fromEntries(customAttributes.map((a) => [a.id, `${modId}:${a.id}${a.displayName ? ` (${a.displayName})` : ""}`])),
+  };
+}
+
 export const ATTRIBUTE_OPERATION_OPTIONS: AttributeOperation[] = ["add_value", "add_multiplied_base", "add_multiplied_total"];
 
 export const EQUIPMENT_SLOT_OPTIONS: EquipmentSlotGroup[] = [

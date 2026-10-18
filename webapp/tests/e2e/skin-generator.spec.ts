@@ -137,3 +137,33 @@ test("Armor Generator groups a set's 6 textures and applies them to an armor set
     await expect(page.getByTestId("resources-panel").locator(`[data-texture-key="custom/ruby_${p}.png"]`)).toBeVisible();
   }
 });
+
+test("Screen GUI Generator: Codex panel is fitted to its size and added to a screen", async ({ page }) => {
+  // a 64×64 stand-in for Codex's big square image; the browser fits it to the default 350×200
+  const dataUrl = `data:image/png;base64,${fs.readFileSync(PNG).toString("base64")}`;
+  let sent: Record<string, unknown> | null = null;
+  await page.route("**/api/gui/codex", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ json: { images: [{ name: "codex_0.png", dataUrl }] } });
+  });
+
+  await seedTextures(page);
+  await seedProject(page, screen());
+  await openEditor(page);
+
+  await page.getByTitle("Screen GUI Generator", { exact: true }).click();
+  const panel = page.getByTestId("gui-generator");
+  await panel.getByRole("button", { name: "Generate", exact: true }).click();
+  await expect(panel.getByAltText("dark oak wood with iron rivets")).toHaveCount(1);
+  expect(sent).toMatchObject({ prompt: "dark oak wood with iron rivets", width: 350, height: 200, count: 2 });
+  await expect(panel.getByText("350×200", { exact: true })).toBeVisible();
+  const size = await panel.getByAltText("dark oak wood with iron rivets").evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]);
+  expect(size).toEqual([350, 200]);
+
+  await panel.getByRole("button", { name: "Add to screen" }).click();
+  await panel.getByRole("button", { name: "main" }).click();
+  await expect(page.getByText("Applied to main")).toBeVisible();
+  await page.getByTitle("Screens", { exact: true }).click();
+  await page.getByTestId("category-view").getByTitle("main", { exact: true }).click();
+  await expect(page.locator('[data-widget-id="sprite_1"]')).toHaveCount(1);
+});

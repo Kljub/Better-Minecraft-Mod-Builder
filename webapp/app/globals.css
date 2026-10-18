@@ -154,3 +154,33 @@
     color-scheme: dark;
   }
 }
+/* ── Minecraft GUI look (creative item picker) ── */
+.mc-panel {
+  background: #c6c6c6;
+  border: 2px solid #000;
+  border-radius: 3px;
+  box-shadow: inset 2px 2px 0 #fff, inset -2px -2px 0 #555;
+}
+.mc-slots { background: #8b8b8b; }
+.mc-slot {
+  background: #8b8b8b;
+  box-shadow: inset 2px 2px 0 #373737, inset -2px -2px 0 #fff;
+}
+.mc-tab {
+  background: #b0b0b0;
+  border: 2px solid #000;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  box-shadow: inset 2px 2px 0 #e0e0e0, inset -2px 0 0 #555;
+  margin-top: 4px;
+}
+.mc-tab-active { background: #c6c6c6; margin-top: 0; height: 48px; box-shadow: inset 2px 2px 0 #fff, inset -2px 0 0 #555; }
+[data-row="bottom"] .mc-tab { border-top: none; border-bottom: 2px solid #000; border-radius: 0 0 3px 3px; margin-top: 0; margin-bottom: 4px; }
+[data-row="bottom"] .mc-tab-active { margin-bottom: 0; }
+.mc-button {
+  background: #6f6f6f;
+  color: #fff;
+  border: 2px solid #000;
+  box-shadow: inset 2px 2px 0 #aaa, inset -2px -2px 0 #444;
+}
+.mc-button:hover { background: #7f7fb0; }

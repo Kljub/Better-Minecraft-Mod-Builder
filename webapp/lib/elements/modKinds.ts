@@ -1,4 +1,4 @@
-import { Terminal, Gavel, Droplets, BriefcaseBusiness, Sprout, Atom, Keyboard, Sailboat, Crosshair, Shirt, Castle } from "lucide-react";
+import { Terminal, Gavel, Droplets, BriefcaseBusiness, Sprout, Atom, Keyboard, Sailboat, Crosshair, Shirt, Castle, PackageOpen } from "lucide-react";
 import type { ElementKindDef, ElementSpec } from "./types";
 import { json, str, num, bool, list, opts, nameOf, textureFile, tagIf } from "./helpers";
 
@@ -103,9 +103,10 @@ export const GAME_RULE: ElementKindDef = {
   description:
     "A new game rule — changed with /gamerule <modid>:<id> and listed in the world-creation Game Rules screen. Commands and functions can read it via execute store; mod code via GameRuleSpecs.getBoolean/getInteger.",
   labelField: "name",
+  idFromLabel: true,
   defaults: () => ({ name: "", description: "", type: "boolean", category: "misc", defaultBoolean: true, defaultInteger: 0, min: 0, max: 100 }),
   fields: [
-    { key: "name", label: "Display name", type: "text", half: true },
+    { key: "name", label: "Display name", type: "text", half: true, help: "The id follows it: lowercase, spaces become _ (until you rename the id yourself)." },
     { key: "category", label: "Category", type: "select", options: GAME_RULE_CATEGORIES, half: true },
     { key: "description", label: "Description (tooltip)", type: "text" },
     { key: "type", label: "Type", type: "select", options: opts(["boolean", "integer"], { boolean: "On / off", integer: "Number" }), half: true },
@@ -243,6 +244,12 @@ interface InlineTrade { level: string; wants: string; wantsCount: number; gives:
 
 const stack = (id: string, count: number) => (count > 1 ? { id, count: Math.min(99, Math.round(count)) } : { id });
 
+/** -1 = unlimited (also for missing/invalid values), else 0..64. */
+const maxPerVillage = (spec: ElementSpec) => {
+  const n = Math.round(num(spec, "maxPerVillage", -1));
+  return n < 0 ? -1 : Math.min(64, n);
+};
+
 export const VILLAGER_PROFESSION: ElementKindDef = {
   kind: "villagerProfession",
   label: "Village profession",
@@ -254,18 +261,22 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
   labelField: "name",
   thumb: (spec) => str(spec, "texture") || undefined,
   defaults: () => ({
-    name: "", jobSiteBlock: "", workSound: "", texture: "", tradesPerLevel: 2,
+    name: "", jobSiteBlock: "", workSound: "", texture: "", tradesPerLevel: 2, maxPerVillage: -1,
     trades: [{ level: "1", wants: "minecraft:emerald", wantsCount: 1, gives: "minecraft:bread", givesCount: 6, maxUses: 16, xp: 2 }],
   }),
   fields: [
     { key: "name", label: "Name (shown in the trade screen)", type: "text", half: true },
     {
-      key: "jobSiteBlock", label: "Job-site block", type: "registry", half: true, placeholder: "mymod:forge_table",
+      key: "jobSiteBlock", label: "Job-site block", type: "registry", itemKind: "block", half: true, placeholder: "mymod:forge_table",
       suggestions: (ctx) => ctx.projectBlocks,
       help: "Usually one of your own blocks — vanilla workstations (loom, lectern, …) already belong to a vanilla job.",
     },
     { key: "workSound", label: "Work sound (optional)", type: "text", mono: true, placeholder: "minecraft:entity.villager.work_toolsmith", half: true },
     { key: "tradesPerLevel", label: "Trades offered per level", type: "number", min: 1, max: 10, integer: true, half: true },
+    {
+      key: "maxPerVillage", label: "Max per village (-1 = unlimited, 0 = none)", type: "number", min: -1, max: 64, integer: true, half: true,
+      help: "How many villagers of one village may have this job. Extra ones that haven't traded yet give it up again; villagers who already traded keep it, like in vanilla. 0 = unemployed villagers never take it.",
+    },
     { key: "texture", label: "Outfit texture (optional)", type: "texture" },
     {
       key: "trades", label: "Trades", type: "list", itemLabel: "Trade",
@@ -273,9 +284,9 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
       fields: [
         { key: "level", label: "Level", type: "select", half: true, options: opts(["1", "2", "3", "4", "5"], { "1": "1 Novice", "2": "2 Apprentice", "3": "3 Journeyman", "4": "4 Expert", "5": "5 Master" }) },
         { key: "maxUses", label: "Max uses before restock", type: "number", min: 1, integer: true, half: true },
-        { key: "wants", label: "Villager wants", type: "registry", half: true, suggestions: (ctx) => [...TRADE_ITEMS, ...ctx.projectItems] },
+        { key: "wants", label: "Villager wants", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => [...TRADE_ITEMS, ...ctx.projectItems] },
         { key: "wantsCount", label: "Count", type: "number", min: 1, max: 99, integer: true, half: true },
-        { key: "gives", label: "Villager gives", type: "registry", half: true, suggestions: (ctx) => [...ctx.projectItems, ...TRADE_ITEMS] },
+        { key: "gives", label: "Villager gives", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => [...ctx.projectItems, ...TRADE_ITEMS] },
         { key: "givesCount", label: "Count", type: "number", min: 1, max: 99, integer: true, half: true },
         { key: "xp", label: "Villager XP", type: "number", min: 0, integer: true, half: true },
       ],
@@ -318,9 +329,10 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
   },
   shared: (spec, { modId }) => ({
     lang: { [`entity.${modId}.villager.${spec.id}`]: nameOf(spec) },
-    tags: tagIf(true, "data/minecraft/tags/point_of_interest_type/acquirable_job_site.json", `${modId}:${spec.id}`),
+    // Limit 0: never an acquirable job site, so unemployed villagers don't even look for it.
+    tags: tagIf(maxPerVillage(spec) !== 0, "data/minecraft/tags/point_of_interest_type/acquirable_job_site.json", `${modId}:${spec.id}`),
     manifest: {
-      villager_professions: { id: spec.id, jobSiteBlock: str(spec, "jobSiteBlock").trim(), workSound: str(spec, "workSound").trim() },
+      villager_professions: { id: spec.id, jobSiteBlock: str(spec, "jobSiteBlock").trim(), workSound: str(spec, "workSound").trim(), maxPerVillage: maxPerVillage(spec) },
     },
   }),
 };
@@ -609,7 +621,7 @@ export const BOAT: ElementKindDef = {
     { key: "chestTexture", label: "Chest boat texture (128×128)", type: "texture", half: true, when: (s) => bool(s, "chestBoat") },
     { key: "chestItemTexture", label: "Chest boat item icon", type: "texture", half: true, when: (s) => bool(s, "chestBoat") },
     {
-      key: "planks", label: "Crafted from (optional)", type: "registry", placeholder: "mymod:ruby_planks",
+      key: "planks", label: "Crafted from (optional)", type: "registry", itemKind: "block", placeholder: "mymod:ruby_planks",
       suggestions: (ctx) => [...ctx.projectBlocks, ...ctx.projectItems],
       help: "Shaped like vanilla: planks in a U. The chest boat is boat + chest.",
     },
@@ -745,8 +757,8 @@ export const ARMOR_TRIM: ElementKindDef = {
     { key: "leggingsTexture", label: "Leggings texture (64×32)", type: "texture", half: true },
     { key: "templateTexture", label: "Smithing template icon", type: "texture", half: true },
     { key: "decal", label: "Decal (drawn over armor details, like Silence)", type: "boolean", half: true },
-    { key: "duplicateWith", label: "Duplicate recipe: surround with", type: "registry", half: true, suggestions: (ctx) => ["minecraft:diamond", ...ctx.projectItems] },
-    { key: "duplicateBase", label: "Duplicate recipe: base block", type: "registry", half: true, suggestions: (ctx) => ["minecraft:cobblestone", ...ctx.projectBlocks] },
+    { key: "duplicateWith", label: "Duplicate recipe: surround with", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => ["minecraft:diamond", ...ctx.projectItems] },
+    { key: "duplicateBase", label: "Duplicate recipe: base block", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => ["minecraft:cobblestone", ...ctx.projectBlocks] },
   ],
   validate: (spec) => (str(spec, "texture") && str(spec, "leggingsTexture") ? [] : ["Pick both armor textures."]),
   textures: (spec) => ["texture", "leggingsTexture", "templateTexture"].map((k) => str(spec, k)).filter(Boolean),
@@ -887,4 +899,78 @@ export const STRUCTURE: ElementKindDef = {
   },
 };
 
-export const MOD_KINDS: ElementKindDef[] = [COMMAND, GAME_RULE, FLUID, VILLAGER_PROFESSION, PLANT, PARTICLE, KEY_BINDING, BOAT, PROJECTILE, ARMOR_TRIM, STRUCTURE];
+// ── Texture pack (resource pack) ─────────────────────────────────────────────
+
+/** Resource-pack format per target version (version.json "pack_version" of each client jar):
+ * 26.2 = 88.0 and declares min/max_format; 1.21.1 = 34 with the old pack_format field. */
+const packMeta = (mcVersion: string, description: string) =>
+  mcVersion === "1.21.1"
+    ? { pack: { pack_format: 34, description } }
+    : { pack: { description, min_format: 88, max_format: 88 } };
+
+interface TextureOverride { target?: string; texture?: string }
+
+/** "minecraft:block/stone", "block/stone.png" → assets/minecraft/textures/block/stone.png */
+export function overridePath(target: string): string | null {
+  const t = target.trim().replace(/\.png$/i, "");
+  const m = /^(?:([a-z0-9_.-]+):)?([a-z0-9_./-]+)$/.exec(t);
+  if (!m || m[2].includes("..")) return null;
+  return `assets/${m[1] ?? "minecraft"}/textures/${m[2]}.png`;
+}
+
+export const TEXTURE_PACK: ElementKindDef = {
+  kind: "texturePack",
+  label: "Texture pack",
+  plural: "Texture Packs",
+  icon: PackageOpen,
+  idPrefix: "texture_pack",
+  standalone: true,
+  download: { label: "Download resource pack", fileName: (spec) => `${spec.id}.zip` },
+  description:
+    "A resource pack that replaces textures of the game (or of mods). Pick a texture to replace and the image to use instead, then download the .zip and put it into .minecraft/resourcepacks. It is not part of the mod export.",
+  labelField: "name",
+  thumb: (spec) => str(spec, "icon") || undefined,
+  defaults: () => ({ name: "", description: "", icon: "", overrides: [{ target: "", texture: "" }] }),
+  fields: [
+    { key: "name", label: "Name", type: "text", half: true },
+    { key: "icon", label: "Pack icon (shown in the pack list, square)", type: "texture", half: true },
+    { key: "description", label: "Description (shown under the name in Minecraft)", type: "text" },
+    {
+      key: "overrides", label: "Replaced textures", type: "list", itemLabel: "Texture",
+      newItem: () => ({ target: "", texture: "" }),
+      fields: [
+        {
+          key: "target", label: "Texture to replace", type: "registry", half: true, placeholder: "item/diamond_sword",
+          suggestions: (ctx) => (ctx.packTextureKeys ?? []).map((k) => k.replace(/\.png$/, "")),
+          help: "Path under textures/, e.g. block/stone or item/apple. Another mod's: modid:item/thing.",
+        },
+        { key: "texture", label: "Replace with", type: "texture", half: true },
+      ],
+    },
+  ],
+  validate: (spec) => {
+    const problems: string[] = [];
+    const overrides = list<TextureOverride>(spec, "overrides");
+    if (overrides.length === 0) problems.push("Add at least one texture to replace.");
+    const seen = new Set<string>();
+    overrides.forEach((o, i) => {
+      const path = overridePath(o.target ?? "");
+      if (!path) problems.push(`Texture ${i + 1}: enter which texture to replace (e.g. block/stone).`);
+      else if (seen.has(path)) problems.push(`Texture ${i + 1}: ${o.target} is replaced twice.`);
+      else seen.add(path);
+      if (!o.texture) problems.push(`Texture ${i + 1}: pick the image to use.`);
+    });
+    return problems;
+  },
+  textures: (spec) => [str(spec, "icon"), ...list<TextureOverride>(spec, "overrides").map((o) => o.texture ?? "")].filter(Boolean),
+  files: (spec, { mcVersion, texture }) => [
+    { path: "pack.mcmeta", content: json(packMeta(mcVersion, str(spec, "description").trim() || nameOf(spec))) },
+    ...textureFile("pack.png", str(spec, "icon"), texture),
+    ...list<TextureOverride>(spec, "overrides").flatMap((o) => {
+      const path = overridePath(o.target ?? "");
+      return path && o.texture ? textureFile(path, o.texture, texture) : [];
+    }),
+  ],
+};
+
+export const MOD_KINDS: ElementKindDef[] = [COMMAND, GAME_RULE, FLUID, VILLAGER_PROFESSION, PLANT, PARTICLE, KEY_BINDING, BOAT, PROJECTILE, ARMOR_TRIM, STRUCTURE, TEXTURE_PACK];

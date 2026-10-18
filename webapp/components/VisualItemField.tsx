@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useTextures } from "@/lib/TextureContext";
 import { ItemIdField } from "@/components/SchemaFields";
-import TexturePickerModal from "@/components/TexturePickerModal";
+import CreativeItemPicker from "@/components/CreativeItemPicker";
 
 /** "minecraft:dirt" -> "dirt" / "modid:my_block" -> "my_block" */
 function bareId(id: string): string {
@@ -36,18 +36,14 @@ interface Props {
  * texture sets the value to whichever project entry owns that texture, or (for a plain vanilla
  * pack texture with no owning entry) guesses a vanilla id back from its "item|block/<name>.png"
  * path. The text field stays too — still there for a quick paste/edit, the swatch is just the
- * primary "browse visually" path. */
+ * primary "browse visually" path. Picking opens the creative-inventory picker (CreativeItemPicker)
+ * with the project's own entries under "This Mod". */
 export default function VisualItemField({ value, onChange, options, modId, kind, entries, placeholder }: Props) {
-  const { packTextures, uploadCustomTexture } = useTextures();
+  const { packTextures } = useTextures();
   const [pickerOpen, setPickerOpen] = useState(false);
   const texKey = resolveEntryTextureKey(value, modId, kind, entries);
   const texUrl = packTextures[texKey];
 
-  const pick = (key: string) => {
-    const owning = entries.find((e) => e.texture === key);
-    onChange(owning ? `${modId}:${owning.id}` : `minecraft:${bareId(key)}`);
-    setPickerOpen(false);
-  };
 
   return (
     <div className="flex items-center gap-1">
@@ -63,14 +59,13 @@ export default function VisualItemField({ value, onChange, options, modId, kind,
           <img src={texUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
         ) : null}
       </button>
-      <ItemIdField value={value} onChange={onChange} options={options} placeholder={placeholder} />
-      <TexturePickerModal
+      <ItemIdField value={value} onChange={onChange} options={options} placeholder={placeholder} picker={false} />
+      <CreativeItemPicker
         open={pickerOpen}
-        packTextures={packTextures}
-        current={texKey}
-        onSelect={pick}
         onClose={() => setPickerOpen(false)}
-        onUpload={uploadCustomTexture}
+        blocksOnly={kind === "block"}
+        modItems={entries.map((e) => ({ id: `${modId}:${e.id}`, iconUrl: packTextures[e.texture] }))}
+        onSelect={(id) => { onChange(id); setPickerOpen(false); }}
       />
     </div>
   );

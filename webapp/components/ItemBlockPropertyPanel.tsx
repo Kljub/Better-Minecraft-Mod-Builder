@@ -11,8 +11,12 @@ import AttributeModifierListEditor from "@/components/AttributeModifierListEdito
 import {
   ITEM_PROPERTY_SCHEMA, ITEM_FOOD_SCHEMA, ITEM_ARMOR_SCHEMA, CREATIVE_TAB_OPTIONS, CREATIVE_TAB_LABELS,
   ATTRIBUTE_OPTIONS, defaultArmorAttributes,
+  attributeLabels as attributeLabelsFor,
 } from "@/lib/itemRegistry";
-import { BLOCK_PROPERTY_SCHEMA, BLOCK_FACES, TOOL_TIER_SPEEDS, approxBreakTime, HARDNESS_REFERENCE, RESISTANCE_REFERENCE } from "@/lib/blockRegistry";
+import {
+  BLOCK_PROPERTY_SCHEMA, BLOCK_FACES, TOOL_TIER_SPEEDS, approxBreakTime, HARDNESS_REFERENCE, RESISTANCE_REFERENCE,
+  LIGHT_REFERENCE, lightComparison, lightBrightness,
+} from "@/lib/blockRegistry";
 
 export type ItemBlockDoc =
   | { kind: "item"; spec: ItemSpec }
@@ -27,6 +31,9 @@ interface Props {
   /** Project-defined custom attributes (beyond the curated vanilla set) — merged into an item's
    * Attributes list's attribute picker. */
   customAttributes: CustomAttributeSpec[];
+  /** shown as the namespace of custom attributes ("<modid>:<id>") */
+  modId?: string;
+  onEditCustomAttribute?: (id: string) => void;
   /** Opens the inline texture editor workspace ("paint a new texture") for this item/block. */
   onOpenTextureEditor: () => void;
 }
@@ -36,7 +43,7 @@ interface Props {
  * section here (those are screen-widget concepts) — just ID, texture, and the propSchema-driven
  * field loop, reusing the same generic form primitives as PropertyPanel (see SchemaFields.tsx).
  */
-export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, customAttributes, onOpenTextureEditor }: Props) {
+export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, customAttributes, onOpenTextureEditor, modId, onEditCustomAttribute }: Props) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [texPickerOpen, setTexPickerOpen] = useState(false);
   const [stagePickerFor, setStagePickerFor] = useState<number | null>(null);
@@ -76,7 +83,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
   };
 
   const attributeOptions = [...ATTRIBUTE_OPTIONS, ...customAttributes.map((a) => a.id)];
-  const attributeLabels = Object.fromEntries(customAttributes.map((a) => [a.id, a.displayName]));
+  const attributeLabels = attributeLabelsFor(customAttributes, modId ?? "mymod");
 
   const schema: PropField[] =
     kind === "item"
@@ -192,6 +199,65 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
           );
         }
 
+        if (field.type === "number" && kind === "block" && field.key === "luminance") {
+          const value = Math.max(0, Math.min(15, Math.round(typeof raw === "number" ? raw : 0)));
+          const like = lightComparison(value);
+          return (
+            <div key={field.key} className="col-span-2" data-testid="light-level">
+              <Field label={field.label}>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range" min={0} max={15} step={1} value={value}
+                    aria-label="Light level"
+                    onChange={(e) => set({ luminance: Number(e.target.value) })}
+                    className="flex-1 accent-primary"
+                  />
+                  <div className="w-14"><NumInput value={value} onChange={(v) => set({ luminance: Math.max(0, Math.min(15, Math.round(v))) })} /></div>
+                </div>
+                <div className="mt-1 rounded border border-input p-1.5 text-[10px] text-muted-foreground">
+                  <div className="text-foreground">
+                    {like
+                      ? <>{like.exact ? "As bright as" : `Close to (${like.level})`}: {like.blocks.join(", ")}</>
+                      : "No light — like a normal block"}
+                  </div>
+                  {/* the light a block receives at each distance: it drops by 1 per block */}
+                  <div className="mt-1 flex gap-px" title="Brightness at 0, 1, 2 … 15 blocks away">
+                    {Array.from({ length: 16 }, (_, d) => {
+                      const b = lightBrightness(Math.max(0, value - d));
+                      return (
+                        <div
+                          key={d}
+                          className="h-4 flex-1 rounded-[1px]"
+                          style={{ background: `rgb(${Math.round(20 + 235 * b)} ${Math.round(18 + 200 * b)} ${Math.round(14 + 120 * b)})` }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className="mt-0.5 flex justify-between text-muted-foreground/70"><span>this block</span><span>15 blocks away</span></div>
+                  {value > 0 && (
+                    <div className="mt-0.5">
+                      {`Lights ${value - 1} block${value - 1 === 1 ? "" : "s"} around it; hostile mobs can't spawn on lit blocks (block light above 0).`}
+                    </div>
+                  )}
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {LIGHT_REFERENCE.map((r) => (
+                      <button
+                        key={r.level}
+                        type="button"
+                        title={`${r.blocks.join(", ")} — light ${r.level}`}
+                        onClick={() => set({ luminance: r.level })}
+                        className={`rounded-sm border px-1 py-px ${r.level === value ? "border-primary text-foreground" : "hover:bg-accent hover:text-foreground"}`}
+                      >
+                        {r.blocks[0]} {r.level}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </Field>
+            </div>
+          );
+        }
+
         if (field.type === "number") {
           const value = typeof raw === "number" ? raw : Number(field.defaultValue ?? 0);
           return (
@@ -273,6 +339,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
             attributes={attributes}
             attributeOptions={attributeOptions}
             attributeLabels={attributeLabels}
+            onEditCustomAttribute={onEditCustomAttribute}
             onChange={setAttributes}
             aiContext={{ target: "item", name: item.displayName, category: item.category, rarity: item.rarity, customAttributes }}
           />

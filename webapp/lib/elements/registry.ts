@@ -2,9 +2,11 @@ import type { ElementKindDef, ElementSpec, ElementsByKind } from "./types";
 import { DATAPACK_KINDS } from "./datapackKinds";
 import { MOD_KINDS } from "./modKinds";
 import { ENTITY_MODEL } from "./modelKind";
+import { SOUND } from "./soundKind";
+import { MESH_MODEL } from "./meshKind";
 
 /** Every generic element kind, in rail order. New MCreator-style types are added here. */
-export const ELEMENT_KINDS: ElementKindDef[] = [ENTITY_MODEL, ...DATAPACK_KINDS, ...MOD_KINDS];
+export const ELEMENT_KINDS: ElementKindDef[] = [ENTITY_MODEL, MESH_MODEL, ...DATAPACK_KINDS, ...MOD_KINDS, SOUND];
 
 const BY_KIND = new Map(ELEMENT_KINDS.map((k) => [k.kind, k]));
 

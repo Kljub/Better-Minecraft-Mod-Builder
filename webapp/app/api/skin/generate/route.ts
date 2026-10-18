@@ -16,8 +16,8 @@ const LOCAL_ONLY_TIMEOUT_MS = 600_000;
 /** a 256×256 RGBA PNG is well below this; the sketch is meant to be a small texture */
 const MAX_SKETCH_BYTES = 2 * 1024 * 1024;
 
-type Mode = "text" | "sketch" | "set" | "block" | "player" | "armor";
-const LOCAL_ONLY: Mode[] = ["block", "player", "armor"];
+type Mode = "text" | "sketch" | "set" | "block" | "player" | "armor" | "gui";
+const LOCAL_ONLY: Mode[] = ["block", "player", "armor", "gui"];
 /** modes that run the SDXL skin model: fewer images, more steps */
 const SDXL: Mode[] = ["player", "armor"];
 const BLOCK_SIZES = [16, 32, 64, 128, 256];
@@ -40,7 +40,7 @@ const clamp = (v: unknown, lo: number, hi: number, fallback: number) => {
   return Math.min(hi, Math.max(lo, n));
 };
 
-/** Uploads the sketch PNG to the backend and returns the ImageEditor value that references it. */
+/** Uploads the sketch PNG to the backend and returns the Gradio file reference for it. */
 async function uploadSketch(backend: SkinBackend, dataUrl: string, signal: AbortSignal) {
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
   if (!m) throw new Error("Sketch must be a PNG data URL");
@@ -51,9 +51,11 @@ async function uploadSketch(backend: SkinBackend, dataUrl: string, signal: Abort
   const res = await fetch(`${BACKEND_URLS[backend]}/gradio_api/upload`, { method: "POST", body: form, headers: backendHeaders(backend), signal });
   if (!res.ok) throw new Error(`Sketch upload failed (${res.status})`);
   const [path] = (await res.json()) as string[];
-  const file = { path, meta: { _type: "gradio.FileData" } };
-  return { background: file, layers: [], composite: file };
+  return { path, meta: { _type: "gradio.FileData" } };
 }
+
+/** an ImageEditor input's value for an uploaded file */
+const editorValue = (file: unknown) => ({ background: file, layers: [], composite: file });
 
 export async function POST(request: Request) {
   const refused = refuseCrossOrigin(request);
@@ -64,7 +66,7 @@ export async function POST(request: Request) {
 
   const backend: SkinBackend = body.backend === "space" ? "space" : "local";
   const mode = body.mode as Mode;
-  if (!["text", "sketch", "set", "block", "player", "armor"].includes(mode)) return Response.json({ error: "Unknown mode" }, { status: 400 });
+  if (!["text", "sketch", "set", "block", "player", "armor", "gui"].includes(mode)) return Response.json({ error: "Unknown mode" }, { status: 400 });
   if (LOCAL_ONLY.includes(mode) && backend !== "local") return Response.json({ error: "This mode only runs on the local backend" }, { status: 400 });
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 300) : "";
   const sdxl = SDXL.includes(mode);
@@ -85,6 +87,15 @@ export async function POST(request: Request) {
       if (!prompt) return Response.json({ error: "Enter a prompt" }, { status: 400 });
       endpoint = { text: "generate", player: "generate_player_skin", armor: "generate_armor" }[mode];
       data = [prompt, count, steps, guidance, seed];
+    } else if (mode === "gui") {
+      if (!prompt) return Response.json({ error: "Describe the style, e.g. \"dark oak wood with iron rivets\"" }, { status: 400 });
+      // optional: an existing GUI texture to restyle (kept at its own size)
+      const sketch = typeof body.sketch === "string" ? await uploadSketch(backend, body.sketch, ctrl.signal) : null;
+      const width = Math.round(clamp(body.width, 16, 512, 176));
+      const height = Math.round(clamp(body.height, 16, 512, 166));
+      const strength = clamp(body.strength, 0, 1, 0.85);
+      endpoint = "generate_gui";
+      data = [sketch, prompt, Math.min(count, 4), strength, steps, guidance, seed, width, height, body.pixelate !== false];
     } else if (mode === "block") {
       if (!prompt) return Response.json({ error: "Enter a prompt, e.g. \"mossy stone bricks\"" }, { status: 400 });
       endpoint = "generate_block";
@@ -96,7 +107,7 @@ export async function POST(request: Request) {
       if (mode === "sketch" && !prompt) return Response.json({ error: "Enter a prompt, e.g. \"steel wrench\"" }, { status: 400 });
       const materials = typeof body.materials === "string" ? body.materials.slice(0, 500) : "";
       if (mode === "set" && !materials.trim()) return Response.json({ error: "Enter at least one material" }, { status: 400 });
-      const sketch = await uploadSketch(backend, body.sketch, ctrl.signal);
+      const sketch = editorValue(await uploadSketch(backend, body.sketch, ctrl.signal));
       endpoint = mode === "sketch" ? "generate_from_sketch" : "generate_tier_set";
       data = mode === "sketch"
         ? [sketch, prompt, count, strength, steps, guidance, seed]

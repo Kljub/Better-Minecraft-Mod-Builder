@@ -60,6 +60,7 @@ public final class ProfessionSpecs {
         }
         pois.register(modBus);
         professions.register(modBus);
+        VillageLimits.register(modId, specs);
     }
 
     private static Block resolveBlock(String modId, ProfessionSpec spec) {

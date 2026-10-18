@@ -731,6 +731,11 @@ array at `assets/<modid>/screenspec/elements/<name>.json` — next to the usual 
 | `boats` | `<id>_boat` / `<id>_chest_boat` entity + item | vanilla boat model and renderer, texture at `textures/entity/boat/<id>.png` |
 | `projectiles` | a thrown projectile entity + the item that throws it | damage, fire, effect, explosion, gravity, cooldown; drawn as its item |
 | `armor_trims` | the `<id>_armor_trim_smithing_template` item | the trim pattern, recipes and paletted textures are exported data |
+| `mesh_models` | an item, or a block (`MeshBlock`: no occlusion, outline = the mesh bounds) + its block item | the look is an OBJ mesh exported for NeoForge's OBJ loader (`models/mesh/<id>/root.json`) |
+
+Mesh Models mobs use the `entities` manifest like cube mobs: their parts carry a `mesh` — the id of
+an exported OBJ item model — and `MeshPartsLayer` draws it at the part's animated pose, so the rig's
+keyframe animations move rigid mesh parts exactly like cubes.
 
 Structures need no Java at all: the export writes `data/<modid>/structure/<id>.nbt` (usable with
 `/place template <modid>:<id>`) and, if enabled, a single-piece jigsaw structure, template pool

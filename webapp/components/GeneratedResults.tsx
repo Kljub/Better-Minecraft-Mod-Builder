@@ -12,7 +12,7 @@ import { useTextures } from "@/lib/TextureContext";
 import { downloadBlob } from "@/lib/exportBundle";
 
 /** what a result is: decides its preview (tiled for blocks, 3D for skins) and where it can be applied */
-export type Kind = "item" | "block" | "player";
+export type Kind = "item" | "block" | "player" | "gui";
 
 export interface GeneratedImage {
   id: string;
@@ -20,8 +20,10 @@ export interface GeneratedImage {
   name: string;
   dataUrl: string;
   prompt: string;
-  /** edge length in pixels (16 … 256; 64 for player skins) */
+  /** edge length in pixels (16 … 256; 64 for player skins); the width for non-square results */
   size: number;
+  /** height when not square (GUI textures) */
+  height?: number;
   /** "custom/…" key once saved to Resources */
   savedKey?: string;
 }
@@ -85,7 +87,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
   emptyText: string;
   /** project elements a result of this kind can be applied to (none for player skins) */
   targetsFor: (kind: Kind) => Target[];
-  onApply: (kind: Kind, idx: number, textureKey: string) => void;
+  onApply: (kind: Kind, idx: number, textureKey: string, img: GeneratedImage) => void;
   onOpen: (kind: Kind, idx: number) => void;
 }) {
   const { packTextures, uploadCustomTexture } = useTextures();
@@ -112,7 +114,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
     setApplyTarget(null);
     try {
       const key = await save(img);
-      onApply(img.kind, idx, key);
+      onApply(img.kind, idx, key, img);
       const it = targetsFor(img.kind)[idx];
       toast.success(`Applied to ${it.displayName || it.id}`, { action: { label: "Open", onClick: () => onOpen(img.kind, idx) } });
     } catch (e) {
@@ -129,8 +131,9 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
     setZoomId(results[(zoomIdx + d + results.length) % results.length].id);
   };
 
-  const sizeLabel = (img: GeneratedImage) => (img.kind === "player" ? "64×64 skin" : `${img.size}×${img.size}`);
-  const article = (kind: Kind) => (kind === "item" ? "an item" : "a block");
+  const sizeLabel = (img: GeneratedImage) => (img.kind === "player" ? "64×64 skin" : `${img.size}×${img.height ?? img.size}`);
+  const article = (kind: Kind) => (kind === "item" ? "an item" : kind === "gui" ? "a screen" : "a block");
+  const applyLabel = (kind: Kind) => (kind === "gui" ? "Add to screen" : `Apply to ${kind}`);
 
   const targetButton = (img: GeneratedImage, it: Target, i: number, compact: boolean) => (
     <button
@@ -189,13 +192,13 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
                       <span className="flex-1" />
                     ) : (
                       <Button variant="outline" size="sm" className="h-6 flex-1 gap-1 px-1 text-[11px]" onClick={() => setApplyTarget(applyTarget === img.id ? null : img.id)} disabled={targets.length === 0} title={targets.length === 0 ? `Add ${article(img.kind)} first` : `Use as ${article(img.kind)}'s texture`}>
-                        Apply to {img.kind}
+                        {applyLabel(img.kind)}
                       </Button>
                     )}
                     <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title={img.savedKey ? "Saved to Resources" : "Save to Resources"} onClick={() => void saveAndToast(img)}>
                       {img.savedKey ? <Check className="h-3.5 w-3.5 text-primary" /> : <Save className="h-3.5 w-3.5" />}
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title={`Download ${img.size}×${img.size} PNG`} onClick={() => void download(img)}>
+                    <Button variant="ghost" size="sm" className="h-6 w-6 p-0" title={`Download ${sizeLabel(img)} PNG`} onClick={() => void download(img)}>
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                   </div>
@@ -231,10 +234,14 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
                 const texels = zoomed.size * (zoomed.kind === "block" && tiledView ? 3 : 1);
                 const cell = `${100 / texels}% ${100 / texels}%`;
                 const side = zoomed.kind === "player" ? "h-[400px] w-[400px]" : "h-[512px] w-[512px]";
+                // non-square GUI textures keep their aspect ratio inside the 512px box
+                const h = zoomed.height ?? zoomed.size;
+                const scale = Math.min(512 / zoomed.size, 512 / h);
+                const box = zoomed.height ? { width: zoomed.size * scale, height: h * scale } : undefined;
                 return (
                   <div
-                    className={`relative ${side} max-w-[calc(100vw-4rem)] max-h-[calc(100vw-4rem)] rounded-sm`}
-                    style={{ background: `repeating-conic-gradient(var(--muted) 0% 25%, transparent 0% 50%) 0 0 / ${texels > 128 ? "16px 16px" : cell}` }}
+                    className={`relative ${box ? "" : side} max-w-[calc(100vw-4rem)] max-h-[calc(100vw-4rem)] rounded-sm`}
+                    style={{ ...box, background: `repeating-conic-gradient(var(--muted) 0% 25%, transparent 0% 50%) 0 0 / ${texels > 128 || box ? "16px 16px" : cell}` }}
                   >
                     {zoomed.kind === "block" && tiledView ? (
                       <div role="img" aria-label={zoomed.prompt} className="absolute inset-0" style={{ backgroundImage: `url(${zoomed.dataUrl})`, backgroundSize: "33.3334% 33.3334%", imageRendering: "pixelated" }} />
@@ -243,7 +250,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
                       <img src={zoomed.dataUrl} alt={zoomed.prompt} className="absolute inset-0 h-full w-full" style={{ imageRendering: "pixelated" }} />
                     )}
                     {/* the grid only helps while a texel is still several screen pixels wide */}
-                    {pixelGrid && texels <= 128 && (
+                    {pixelGrid && texels <= 128 && !box && (
                       <div
                         className="pointer-events-none absolute inset-0"
                         style={{ backgroundImage: "linear-gradient(to right, rgb(127 127 127 / 0.35) 1px, transparent 1px), linear-gradient(to bottom, rgb(127 127 127 / 0.35) 1px, transparent 1px)", backgroundSize: cell }}
@@ -285,7 +292,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
             </div>
             {targetsFor(zoomed.kind).length > 0 && (
               <div className="flex flex-wrap items-center gap-1 text-xs">
-                <span className="mr-1 text-muted-foreground">Apply to {zoomed.kind}:</span>
+                <span className="mr-1 text-muted-foreground">{applyLabel(zoomed.kind)}:</span>
                 {targetsFor(zoomed.kind).map((it, i) => targetButton(zoomed, it, i, false))}
               </div>
             )}

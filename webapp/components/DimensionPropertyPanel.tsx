@@ -131,7 +131,7 @@ export default function DimensionPropertyPanel({ dimension, biomes, blocks, modI
       <div className="col-span-2 font-semibold text-muted-foreground mt-1">World (flat generator)</div>
       <div className="col-span-2">
         <Field label="Biome">
-          <ItemIdField value={dimension.biome} onChange={(v) => onUpdate({ biome: v })} options={biomeOptions} placeholder="minecraft:plains" />
+          <ItemIdField value={dimension.biome} onChange={(v) => onUpdate({ biome: v })} options={biomeOptions} placeholder="minecraft:plains" picker={false} />
         </Field>
       </div>
 
@@ -161,7 +161,7 @@ export default function DimensionPropertyPanel({ dimension, biomes, blocks, modI
                 <img src={texUrl} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
               ) : null}
             </button>
-            <ItemIdField value={layer.block} onChange={(v) => setLayers(layers.map((l, j) => j === i ? { ...l, block: v } : l))} options={blockOptions} />
+            <ItemIdField value={layer.block} onChange={(v) => setLayers(layers.map((l, j) => j === i ? { ...l, block: v } : l))} options={blockOptions} blocksOnly />
             <NumInput value={layer.height} onChange={(v) => setLayers(layers.map((l, j) => j === i ? { ...l, height: Math.max(1, Math.round(v)) } : l))} />
             <button
               title="Remove layer"

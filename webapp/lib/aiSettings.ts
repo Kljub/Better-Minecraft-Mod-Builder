@@ -118,13 +118,17 @@ export async function fetchAiStatus(): Promise<Record<AiClientId, AiCliStatus>> 
   return res.json();
 }
 
-export async function aiGenerate<T>(provider: AiClientId, task: string, prompt: string, context: Record<string, unknown>): Promise<T> {
+export async function aiGenerate<T>(
+  provider: AiClientId, task: string, prompt: string, context: Record<string, unknown>,
+  /** optional labelled images as data URLs (PNG/JPEG/WebP), e.g. renders of a model */
+  images?: { data: string; label: string }[],
+): Promise<T> {
   const { enabled, model } = load().clients[provider];
   if (!enabled) throw new Error(`${provider} is disabled — enable it in Settings → AI.`);
   const res = await fetch("/api/ai/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, model, task, prompt, context }),
+    body: JSON.stringify({ provider, model, task, prompt, context, ...(images?.length ? { images } : {}) }),
   });
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);

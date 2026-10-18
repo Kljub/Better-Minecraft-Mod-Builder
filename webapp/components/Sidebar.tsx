@@ -2,7 +2,7 @@
 
 import {
   ChevronLeft, LayoutGrid, Monitor, Sword, Box, Shield, Folders, Tags, Sparkles, FlaskConical,
-  Paintbrush, Trophy, Hammer, Users, Package, Mountain, Globe, Settings, Wand2, Bot, Blocks, ShieldPlus,
+  Paintbrush, Trophy, Hammer, Users, Package, Mountain, Globe, Settings, Wand2, Bot, Blocks, ShieldPlus, PanelsTopLeft,
   type LucideIcon,
 } from "lucide-react";
 import { ELEMENT_KINDS, getElementKind } from "@/lib/elements/registry";
@@ -16,12 +16,12 @@ export type ActiveDocType =
 /** Workspace sections in rail order (TOOL_SECTIONS are tools, not element lists). */
 export const SECTIONS = [
   "screens", "items", "blocks", "armors", "creativeTabs", "customAttributes", "effects", "potions",
-  "resources", "skinGenerator", "blockGenerator", "armorGenerator", "modelGenerator", "achievements", "recipes", "trades", "lootEntries", "biomes", "dimensions",
+  "resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator", "achievements", "recipes", "trades", "lootEntries", "biomes", "dimensions",
 ] as const;
 /** Sections that open a tool instead of a category's element browser: the image library
  * (custom textures), the AI item/skin texture generator, the AI block texture generator, the AI
- * armor set generator and the AI mob builder. */
-export const TOOL_SECTIONS = ["resources", "skinGenerator", "blockGenerator", "armorGenerator", "modelGenerator"] as const;
+ * armor set generator, the AI screen GUI texture generator and the AI mob builder. */
+export const TOOL_SECTIONS = ["resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator"] as const;
 export type ToolSection = (typeof TOOL_SECTIONS)[number];
 export const isToolSection = (key: SectionKey): key is ToolSection => (TOOL_SECTIONS as readonly string[]).includes(key);
 /** Built-in sections, plus one `el:<kind>` section per generic element kind (lib/elements). */
@@ -31,7 +31,7 @@ type BuiltinSection = (typeof SECTIONS)[number];
 /** Icon per workspace section — shared by the icon rail, the category views and the workspace overview. */
 export const SECTION_ICONS: Record<BuiltinSection, LucideIcon> = {
   screens: Monitor, items: Sword, blocks: Box, armors: Shield, creativeTabs: Folders,
-  customAttributes: Tags, effects: Sparkles, potions: FlaskConical, resources: Paintbrush, skinGenerator: Wand2, blockGenerator: Blocks, armorGenerator: ShieldPlus, modelGenerator: Bot,
+  customAttributes: Tags, effects: Sparkles, potions: FlaskConical, resources: Paintbrush, skinGenerator: Wand2, blockGenerator: Blocks, armorGenerator: ShieldPlus, guiGenerator: PanelsTopLeft, modelGenerator: Bot,
   achievements: Trophy, recipes: Hammer, trades: Users, lootEntries: Package,
   biomes: Mountain, dimensions: Globe,
 };
@@ -39,7 +39,7 @@ export const SECTION_ICONS: Record<BuiltinSection, LucideIcon> = {
 export const SECTION_LABELS: Record<BuiltinSection, string> = {
   screens: "Screens", items: "Items", blocks: "Blocks", armors: "Armor", creativeTabs: "Creative Tabs",
   customAttributes: "Custom Attributes", effects: "Effects", potions: "Potions", resources: "Resources",
-  skinGenerator: "Item Skin Generator", blockGenerator: "Block Generator", armorGenerator: "Armor Generator", modelGenerator: "Entity Model Generator",
+  skinGenerator: "Item Skin Generator", blockGenerator: "Block Generator", armorGenerator: "Armor Generator", guiGenerator: "Screen GUI Generator", modelGenerator: "Entity Model Generator",
   achievements: "Achievements", recipes: "Crafting Recipes", trades: "Trading", lootEntries: "Loot Tables",
   biomes: "Biomes", dimensions: "Dimensions",
 };

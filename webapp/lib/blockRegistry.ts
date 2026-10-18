@@ -63,5 +63,33 @@ export function approxBreakTime(hardness: number, toolSpeed: number, isHand: boo
   return seconds < 0.05 ? "instant" : `${seconds.toFixed(2)}s`;
 }
 
+/** Vanilla light sources by emitted block light — reference for the Light Level field. */
+export const LIGHT_REFERENCE: { level: number; blocks: string[] }[] = [
+  { level: 15, blocks: ["Glowstone", "Sea Lantern", "Lantern", "Jack o'Lantern", "Shroomlight", "Beacon", "Lava"] },
+  { level: 14, blocks: ["Torch", "End Rod"] },
+  { level: 13, blocks: ["Furnace (lit)"] },
+  { level: 11, blocks: ["Nether Portal"] },
+  { level: 10, blocks: ["Soul Torch", "Soul Lantern", "Crying Obsidian"] },
+  { level: 9, blocks: ["Redstone Ore (lit)"] },
+  { level: 7, blocks: ["Redstone Torch", "Enchanting Table", "Ender Chest", "Glow Lichen"] },
+  { level: 5, blocks: ["Amethyst Cluster"] },
+  { level: 3, blocks: ["Magma Block"] },
+  { level: 1, blocks: ["Brewing Stand", "Brown Mushroom", "Dragon Egg"] },
+];
+
+/** The vanilla blocks closest in brightness to a light level ("like a Torch"), or null for 0. */
+export function lightComparison(level: number): { level: number; blocks: string[]; exact: boolean } | null {
+  if (!Number.isFinite(level) || level <= 0) return null;
+  const nearest = LIGHT_REFERENCE.reduce((best, r) => (Math.abs(r.level - level) < Math.abs(best.level - level) ? r : best));
+  return { ...nearest, exact: nearest.level === level };
+}
+
+/** On-screen brightness (0..1) of a block lit at `level`, following the game's light curve
+ * (default gamma): brightness = l / (4 - 3l) with l = level / 15. */
+export function lightBrightness(level: number): number {
+  const l = Math.max(0, Math.min(15, level)) / 15;
+  return l / (4 - 3 * l);
+}
+
 export const HARDNESS_REFERENCE = "Dirt 0.5 · Stone 1.5 · Obsidian 50 · Bedrock unbreakable (-1)";
 export const RESISTANCE_REFERENCE = "Dirt 0.5 · Stone 6 · Obsidian 1200 · Bedrock 3,600,000";

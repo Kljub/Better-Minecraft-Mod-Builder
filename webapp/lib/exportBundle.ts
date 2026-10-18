@@ -5,6 +5,7 @@ import type { ElementsByKind } from "./elements/types";
 import { DEFAULT_MC_VERSION, type McVersion } from "./mcVersion";
 import { writeElementFiles, writeElementArchiveCopies, hasElements, elementTextureKeys, elementBinaryKeys } from "./elements/export";
 import { loadStructureFiles } from "./structureStore";
+import { primeMeshPacks } from "./model3d/meshPackStore";
 import { loadAllTextures } from "./textureStore";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, BlockFaceKey, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
@@ -644,6 +645,7 @@ async function loadElementBinaries(r: ResolvedInput): Promise<Record<string, Blo
   const keys = elementBinaryKeys(r.elements);
   if (keys.length === 0) return {};
   const files = await loadStructureFiles(keys);
+  await primeMeshPacks(files);
   return Object.fromEntries(Object.entries(files).map(([k, b]) => [`structure:${k}`, b]));
 }
 

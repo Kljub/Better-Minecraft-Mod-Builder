@@ -11,7 +11,8 @@ the same way:
   /generate_block        (prompt, count, steps, guidance, seed, engine, tileable, size)  -- see block_texture.py
   /generate_player_skin  (prompt, count, steps, guidance, seed)   -- see player_skin.py
   /generate_armor        (material, count, steps, guidance, seed)  -- see armor.py
-(the last three exist only locally, not on the Space)
+  /generate_gui          (sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate)  -- see gui_texture.py
+(the last four exist only locally, not on the Space)
   /status                () -> {"device", "model", "dtype"}
 
 Each returns (previews, files); the files are the finished 16x16 RGBA PNGs (64x64 skins for
@@ -35,6 +36,7 @@ from diffusers import DPMSolverMultistepScheduler, StableDiffusionImg2ImgPipelin
 
 import armor
 import block_texture
+import gui_texture
 import player_skin
 
 MODEL = os.environ.get("SKIN_GENERATOR_MODEL", "yuuki14202028/minecraft-item-16px")
@@ -213,6 +215,19 @@ def generate_armor(material, count, steps, guidance, seed):
     return previews, files
 
 
+def generate_gui(sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate):
+    """GUI textures: from text at width x height, or restyling `sketch` (an existing GUI texture,
+    kept at its own size and transparency)."""
+    if not prompt.strip():
+        raise gr.Error("Describe the style. For example: dark oak wood with iron rivets")
+    src = editor_image(sketch)
+    if src is None and not (16 <= int(width) <= 512 and 16 <= int(height) <= 512):
+        raise gr.Error("Size must be between 16 and 512")
+    images = gui_texture.generate(prompt, count, steps, guidance, seed, width, height, src, strength,
+                                  bool(pixelate), DEVICE, DTYPE)
+    return save_files(images, prompt, "gui")
+
+
 def status() -> dict:
     name = torch.cuda.get_device_name(0) if DEVICE == "cuda" else DEVICE
     return {"device": name, "model": MODEL, "dtype": str(DTYPE).replace("torch.", "")}
@@ -284,6 +299,22 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
         a_files = gr.Files(label="layers + icons")
         a_run.click(generate_armor, [a_material, a_count, a_steps, a_guidance, a_seed], [a_gallery, a_files],
                     api_name="generate_armor")
+    with gr.Tab("Screen GUI"):
+        g_sketch = gr.Image(type="pil", image_mode="RGBA", label="Restyle this GUI texture (optional)")
+        g_prompt = gr.Textbox(label="Style", value="dark oak wood with iron rivets")
+        g_count = gr.Slider(1, 4, value=2, step=1, label="Images")
+        g_strength = gr.Slider(0.0, 1.0, value=0.85, step=0.05, label="Strength (restyle only: 0 = original, 1 = new material)")
+        g_steps = gr.Slider(10, 50, value=30, step=1, label="Steps")
+        g_guidance = gr.Slider(1.0, 15.0, value=7.0, step=0.5, label="Guidance")
+        g_seed = gr.Number(value=0, precision=0, label="Seed")
+        g_w = gr.Number(value=176, precision=0, label="Width (text only)")
+        g_h = gr.Number(value=166, precision=0, label="Height (text only)")
+        g_pix = gr.Checkbox(value=True, label="Pixel art palette")
+        g_run = gr.Button("Generate", variant="primary")
+        g_gallery = gr.Gallery(columns=4, height=300)
+        g_files = gr.Files(label="PNG")
+        g_run.click(generate_gui, [g_sketch, g_prompt, g_count, g_strength, g_steps, g_guidance, g_seed, g_w, g_h, g_pix],
+                    [g_gallery, g_files], api_name="generate_gui")
     with gr.Tab("Player skin"):
         p_prompt = gr.Textbox(label="Prompt", value="a knight in golden armor")
         p_count = gr.Slider(1, 4, value=2, step=1, label="Images")

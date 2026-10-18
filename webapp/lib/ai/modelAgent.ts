@@ -44,6 +44,8 @@ export async function startAgentRun(opts: {
   model: string;
   prompt: string;
   context: Record<string, unknown>;
+  /** optional reference images (data URLs), each labelled with the view it shows */
+  images?: { data: string; view: string }[];
 }) {
   if (state.running) return;
   controller = new AbortController();

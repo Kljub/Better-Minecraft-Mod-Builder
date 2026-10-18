@@ -1,13 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, FileJson, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileJson, Loader2, Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import TexturePickerModal from "@/components/TexturePickerModal";
 import StructureField from "@/components/StructureField";
+import MeshModelField from "@/components/MeshModelField";
+import SoundField from "@/components/SoundField";
+import type { SoundValue } from "@/lib/elements/soundKind";
 import { Field, NumInput, Toggle, ItemIdField, TextureField, HexColorField } from "@/components/SchemaFields";
 import { useTextures } from "@/lib/TextureContext";
+import { loadAllTextures } from "@/lib/textureStore";
+import { buildStandaloneZip } from "@/lib/elements/export";
+import { downloadBlob } from "@/lib/exportBundle";
 import type { ElementKindDef, ElementSpec, FieldContext, FieldDef } from "@/lib/elements/types";
 import type { McVersion } from "@/lib/mcVersion";
 
@@ -30,6 +36,7 @@ export default function ElementEditor({ def, spec, ctx, onChange }: {
         <Icon className="h-5 w-5 text-primary" />
         <h2 className="text-base font-semibold">{def.label}</h2>
         <span className="font-mono text-muted-foreground">{ctx.modId}:{spec.id}</span>
+        {def.download && <StandaloneDownload def={def} spec={spec} mcVersion={ctx.mcVersion} modId={ctx.modId} disabled={problems.length > 0} />}
       </div>
       <p className="max-w-2xl leading-relaxed text-muted-foreground">{def.description}</p>
       {problems.length > 0 && (
@@ -122,7 +129,8 @@ function FieldInput({ field, value, ctx, onChange }: {
     case "color":
       return <HexColorField value={text || "#ffffff"} onChange={onChange} />;
     case "registry":
-      return <ItemIdField value={text} options={field.suggestions(ctx)} placeholder={field.placeholder} onChange={onChange} />;
+      return <ItemIdField value={text} options={field.suggestions(ctx)} placeholder={field.placeholder} onChange={onChange}
+        picker={!!field.itemKind} blocksOnly={field.itemKind === "block"} />;
     case "texture":
       return (
         <>
@@ -156,6 +164,10 @@ function FieldInput({ field, value, ctx, onChange }: {
     }
     case "structure":
       return <StructureField value={text} onChange={onChange} />;
+    case "meshModel":
+      return <MeshModelField value={value} onChange={onChange} />;
+    case "sound":
+      return <SoundField value={value as SoundValue | undefined} onChange={onChange} />;
     case "list": {
       const rows = Array.isArray(value) ? (value as Record<string, unknown>[]) : [];
       const set = (i: number, patch: Record<string, unknown>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -182,6 +194,37 @@ function FieldInput({ field, value, ctx, onChange }: {
   }
 }
 
+/** "Download …" for standalone elements (ElementKindDef.download), e.g. a resource pack zip.
+ * Textures come from this browser's store (uploads, extracted jar) or, for catalog-only vanilla
+ * textures, their URL. */
+function StandaloneDownload({ def, spec, mcVersion, modId, disabled }: {
+  def: ElementKindDef; spec: ElementSpec; mcVersion: McVersion; modId: string; disabled: boolean;
+}) {
+  const { packTextures } = useTextures();
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const stored = await loadAllTextures();
+      const blobs: Record<string, Blob> = {};
+      for (const key of def.textures?.(spec) ?? []) {
+        const blob = stored[`pack:${key}`] ?? (packTextures[key] ? await fetch(packTextures[key]).then((r) => (r.ok ? r.blob() : undefined)).catch(() => undefined) : undefined);
+        if (blob) blobs[key] = blob;
+      }
+      const zip = await buildStandaloneZip(def, spec, { modId, mcVersion, texture: (k) => blobs[k] });
+      downloadBlob(zip, def.download!.fileName(spec));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Button size="sm" className="ml-auto h-7 gap-1.5 text-xs" disabled={busy || disabled} onClick={run} title={disabled ? "Fix the problems below first" : undefined}>
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+      {def.download!.label}
+    </Button>
+  );
+}
+
 /** Side panel: the files this element exports, each expandable to its exact content. */
 export function ElementFilesPreview({ def, spec, modId, mcVersion }: { def: ElementKindDef; spec: ElementSpec; modId: string; mcVersion: McVersion }) {
   const [open, setOpen] = useState<string | null>(null);
@@ -194,6 +237,7 @@ export function ElementFilesPreview({ def, spec, modId, mcVersion }: { def: Elem
     ...Object.keys(shared?.tags ?? {}),
     ...Object.keys(shared?.manifest ?? {}).map((name) => `assets/${modId}/screenspec/elements/${name}.json`),
     ...Object.keys(shared?.atlases ?? {}).map((a) => (a.includes(":") ? `assets/${a.replace(":", "/atlases/")}.json` : `assets/minecraft/atlases/${a}.json`)),
+    ...Object.keys(shared?.jsonMerge ?? {}),
   ];
   const thumb = def.thumb?.(spec);
   return (

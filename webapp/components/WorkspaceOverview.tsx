@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Search, SquareArrowOutUpRight, Pencil, Copy, Download, Clipboard, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { copyToClipboard } from "@/lib/utils";
 
 export interface WorkspaceEntry {
   /** stable React key, unique across all sections */
@@ -206,7 +207,7 @@ function EntryContextMenu({ x, y, entry, section, onClose }: {
       {item("Duplicate", Copy, entry.onDuplicate)}
       {sep}
       {item("Export", Download, entry.onExport)}
-      {item("Copy ID", Clipboard, () => { navigator.clipboard?.writeText(id).catch(() => {}); })}
+      {item("Copy ID", Clipboard, () => { copyToClipboard(id).catch(() => {}); })}
       {sep}
       {item("Delete", Trash2, entry.onDelete, true)}
     </div>

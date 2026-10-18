@@ -31,8 +31,11 @@ public class SpecModel extends EntityModel<SpecRenderState> {
     private final KeyframeAnimation walk;
     private final KeyframeAnimation attack;
 
+    final EntitySpec spec;
+
     public SpecModel(ModelPart root, EntitySpec spec) {
         super(root);
+        this.spec = spec;
         this.idle = bake(root, spec, spec.idleAnimation);
         this.walk = bake(root, spec, spec.walkAnimation);
         this.attack = bake(root, spec, spec.attackAnimation);

@@ -97,6 +97,36 @@ export async function readSpecBundle(file: Blob, category: ImportCategory): Prom
   return finish(raw, {});
 }
 
+/** The `screens` list of a full-project export (`<name>/<name>.json` in the zip, or the bare JSON). */
+/** The project JSON of a full-project export (`<name>/<name>.json` in the zip, or the bare JSON). */
+export async function readProjectJson(file: Blob): Promise<Record<string, unknown> | null> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let json: unknown;
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    const zip = await JSZip.loadAsync(buffer);
+    const path = Object.keys(zip.files).find((p) => /^([^/]+)\/\1\.json$/.test(p));
+    if (!path) return null;
+    json = JSON.parse(await zip.file(path)!.async("string"));
+  } else {
+    json = JSON.parse(new TextDecoder().decode(buffer));
+  }
+  return isRecord(json) ? json : null;
+}
+
+export async function readProjectScreens(file: Blob): Promise<unknown[]> {
+  const json = await readProjectJson(file);
+  return json && Array.isArray(json.screens) ? json.screens : [];
+}
+
+/** Category folder names of a project export (`elementFolders`: kind or "@section" -> names). */
+export async function readProjectFolders(file: Blob): Promise<Record<string, string[]>> {
+  const raw = (await readProjectJson(file).catch(() => null))?.elementFolders;
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).flatMap(([k, v]) =>
+    Array.isArray(v) ? [[k, v.filter((n): n is string => typeof n === "string" && n.trim() !== "").map((n) => n.trim())]] : []));
+}
+
 /** Upserts `incoming` into `existing` by id: a known id is replaced in place, a new one appended. */
 export function mergeSpecsById<T extends { id: string }>(existing: T[], incoming: T[]): { list: T[]; added: number; updated: number; firstIdx: number } {
   const list = [...existing];
@@ -118,4 +148,17 @@ export function mergeSpecsById<T extends { id: string }>(existing: T[], incoming
     }
   }
   return { list, added, updated, firstIdx };
+}
+
+/**
+ * The screen JSON of a screen export: a plain .json, or the zip a screen with custom sprite
+ * textures is exported as (its root .json next to assets/).
+ */
+export async function readScreenExport(file: Blob): Promise<unknown> {
+  const bytes = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4b) return JSON.parse(await file.text());
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const root = Object.keys(zip.files).find((p) => !p.includes("/") && p.toLowerCase().endsWith(".json"));
+  if (!root) throw new Error("No screen JSON in this zip.");
+  return JSON.parse(await zip.file(root)!.async("string"));
 }

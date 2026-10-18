@@ -88,7 +88,7 @@ export const ENTITY_SETTINGS_FIELDS: FieldDef[] = [
     help: "Each drop is rolled on its own. Looting adds up to the bonus per level.",
     newItem: () => ({ item: "minecraft:rotten_flesh", min: 0, max: 2, chance: 1, lootingBonus: 1, playerKillOnly: false, smeltWhenOnFire: false }),
     fields: [
-      { key: "item", label: "Item", type: "registry", suggestions: dropItems, placeholder: "minecraft:bone" },
+      { key: "item", label: "Item", type: "registry", itemKind: "item", suggestions: dropItems, placeholder: "minecraft:bone" },
       { key: "min", label: "Count min", type: "number", min: 0, max: 64, integer: true, half: true },
       { key: "max", label: "Count max", type: "number", min: 0, max: 64, integer: true, half: true },
       { key: "chance", label: "Chance (0–1)", type: "number", min: 0, max: 1, half: true },
@@ -102,7 +102,7 @@ export const ENTITY_SETTINGS_FIELDS: FieldDef[] = [
     help: "Rolled every time the mob takes damage, like a sheep losing wool. NeoForge only (Bedrock add-ons ignore it).",
     newItem: () => ({ item: "minecraft:feather", min: 1, max: 1, chance: 0.25, playerOnly: true }),
     fields: [
-      { key: "item", label: "Item", type: "registry", suggestions: dropItems, placeholder: "minecraft:feather" },
+      { key: "item", label: "Item", type: "registry", itemKind: "item", suggestions: dropItems, placeholder: "minecraft:feather" },
       { key: "min", label: "Count min", type: "number", min: 1, max: 64, integer: true, half: true },
       { key: "max", label: "Count max", type: "number", min: 1, max: 64, integer: true, half: true },
       { key: "chance", label: "Chance per hit (0–1)", type: "number", min: 0, max: 1, half: true },

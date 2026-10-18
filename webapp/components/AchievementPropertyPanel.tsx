@@ -123,6 +123,7 @@ export default function AchievementPropertyPanel({ achievement, achievements, it
             onChange={(v) => onUpdate({ toDimension: v })}
             options={dimensionOptions}
             placeholder="minecraft:the_nether"
+            picker={false}
           />
         </Field>
       )}

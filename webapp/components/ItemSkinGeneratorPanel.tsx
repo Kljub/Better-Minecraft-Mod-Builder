@@ -53,6 +53,7 @@ async function toSketchPng(url: string): Promise<string> {
 const MODEL_OF: Record<Kind, string> = {
   item: "yuuki14202028/minecraft-item-16px",
   block: "",
+  gui: "",
   player: "monadical-labs/minecraft-skin-generator-sdxl",
 };
 

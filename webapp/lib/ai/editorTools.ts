@@ -4,7 +4,7 @@ import type { ElementKindDef, ElementSpec, ElementsByKind } from "@/lib/elements
 import type { EntityModel, FaceKey, Vec3 } from "@/lib/model3d/types";
 import type { McVersion } from "@/lib/mcVersion";
 import {
-  addBones, addCubes, deleteTargets, describeModel, editTarget, findBone, generateAnimation, mirrorTarget, moveBone, packUv, templateModel,
+  addBones, addCubes, deleteTargets, describeModel, describeMotion, editTarget, findBone, generateAnimation, holdItem, mirrorTarget, moveBone, packUv, templateModel,
   type BoneInput, type CubeInput,
 } from "@/lib/model3d/aiOps";
 import { emptyModel } from "@/lib/model3d/geometry";
@@ -35,6 +35,13 @@ export interface EditorApi {
 const MODEL_KIND = "entityModel";
 const pascal = (s: string) => s.replace(/(^|[_\-\s.]+)([a-z0-9])/gi, (_, __, c: string) => c.toUpperCase()).replace(/[^A-Za-z0-9]/g, "") || "Model";
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
+/** Where each rotated limb's tip goes — lets the AI catch sign mistakes without a screenshot. */
+function motionReport(model: EntityModel, animation: string): { motion?: string[] } {
+  const anim = (model.animations ?? []).find((x) => x.name === animation);
+  const motion = anim ? describeMotion(model, anim) : [];
+  return motion.length ? { motion: [...motion, "Check: an attack/raised arm must move FORWARD (-Z). If a tip goes the wrong way, flip that rotation's sign."] } : {};
+}
 
 /** Executes one bridge command against the current editor state. */
 export async function runTool(api: () => EditorApi, tool: string, args: Record<string, unknown>): Promise<unknown> {
@@ -140,6 +147,15 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
       return withModel((m) => editTarget(m, String(a.target), (a.changes as Record<string, unknown>) ?? {}));
     case "move_bone":
       return withModel((m) => moveBone(m, String(a.bone), a.offset as unknown as Vec3));
+    case "hold_item": {
+      let placed: { hand: Vec3 } | null = null;
+      const res = await withModel((m) => {
+        const r = holdItem(m, String(a.item), String(a.hand), { direction: a.direction, grip: a.grip });
+        placed = r;
+        return r.model;
+      });
+      return { ...res, hand: placed!.hand, note: "item bone pivot = hand, parented to the arm; take a side screenshot to check" };
+    }
     case "delete_elements":
       return withModel((m) => deleteTargets(m, a.targets as unknown as string[]));
     case "mirror_element":
@@ -173,8 +189,8 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
         const anim = makeAnimation(name, { length: Number(a.length), loop: (a.loop as LoopMode) ?? "loop" });
         return { ...m, animations: [...(m.animations ?? []).filter((x) => x.name !== name), anim] };
       });
-    case "add_keyframes":
-      return withModel((m) => {
+    case "add_keyframes": {
+      const res = await withModel((m) => {
         const anims = m.animations ?? [];
         const idx = anims.findIndex((x) => x.name === String(a.animation));
         if (idx < 0) throw new Error(`animation "${a.animation}" not found — create_animation first`);
@@ -186,11 +202,17 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
         }
         return { ...m, animations: anims.map((x, j) => (j === idx ? anim : x)) };
       });
-    case "generate_animation":
-      return withModel((m) => {
+      return { ...res, ...motionReport(getModel(String(a.model)), String(a.animation)) };
+    }
+    case "generate_animation": {
+      let name = "";
+      const res = await withModel((m) => {
         const anim = generateAnimation(m, a.kind as unknown as "walk" | "idle" | "attack" | "fly", { name: a.name, speed: a.speed, intensity: a.intensity });
+        name = anim.name;
         return { ...m, animations: [...(m.animations ?? []).filter((x) => x.name !== anim.name), anim] };
       });
+      return { ...res, ...motionReport(getModel(String(a.model)), name) };
+    }
     case "set_entity_settings": {
       const id = String(a.model);
       const i = indexOf(MODEL_KIND, id);

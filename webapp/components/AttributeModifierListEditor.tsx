@@ -13,6 +13,8 @@ interface Props {
   attributeLabels?: Record<string, string>;
   onChange: (next: AttributeModifierSpec[]) => void;
   addLabel?: string;
+  /** opens a custom attribute (one of `attributeOptions` that isn't vanilla) in its own editor */
+  onEditCustomAttribute?: (id: string) => void;
   /** what's being edited — enables the "✨ AI" prompt row when an AI provider is set in Settings → AI */
   aiContext?: {
     target: "item" | "effect";
@@ -28,8 +30,9 @@ interface Props {
  * amplifier level by vanilla). Matches vanilla's data-driven AttributeModifiers, not a scripted
  * power system. */
 export default function AttributeModifierListEditor({
-  attributes, attributeOptions, attributeLabels, onChange, addLabel = "+ Add attribute", aiContext,
+  attributes, attributeOptions, attributeLabels, onChange, addLabel = "+ Add attribute", aiContext, onEditCustomAttribute,
 }: Props) {
+  const isCustom = (id: string) => !(ATTRIBUTE_OPTIONS as readonly string[]).includes(id);
   return (
     <>
       {aiContext && <AiAttributesRow context={aiContext} onResult={onChange} />}
@@ -46,6 +49,16 @@ export default function AttributeModifierListEditor({
                 labels={attributeLabels}
                 onChange={(v) => onChange(attributes.map((a, j) => j === i ? { ...a, attribute: v } : a))}
               />
+              {onEditCustomAttribute && isCustom(attr.attribute) && (
+                <button
+                  title={`Edit the custom attribute ${attributeLabels?.[attr.attribute] ?? attr.attribute}`}
+                  aria-label="Edit custom attribute"
+                  onClick={() => onEditCustomAttribute(attr.attribute)}
+                  className="shrink-0 text-muted-foreground hover:text-primary px-1"
+                >
+                  ✎
+                </button>
+              )}
               <button
                 title="Remove"
                 onClick={() => onChange(attributes.filter((_, j) => j !== i))}

@@ -2,7 +2,7 @@
 
 import { CloudStatusChip } from "@/components/AuthGate";
 import { cloudSaveProjects } from "@/lib/cloud/sync";
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { arrayMove } from "@dnd-kit/sortable";
 import Canvas from "@/components/Canvas";
@@ -40,9 +40,11 @@ import ResourcesPanel from "@/components/ResourcesPanel";
 import ItemSkinGeneratorPanel from "@/components/ItemSkinGeneratorPanel";
 import BlockGeneratorPanel from "@/components/BlockGeneratorPanel";
 import ArmorGeneratorPanel from "@/components/ArmorGeneratorPanel";
+import ScreenGuiGeneratorPanel from "@/components/ScreenGuiGeneratorPanel";
 import ElementEditor, { ElementFilesPreview } from "@/components/ElementEditor";
 import ModelEditor from "@/components/model3d/ModelEditor";
 import { defaultEntitySettings } from "@/lib/elements/entitySettings";
+import { followLabelId, withLabelId } from "@/lib/elements/helpers";
 import { setBridgeEnabled, useBridgeEnabled, useMcpBridge } from "@/lib/ai/mcpBridge";
 import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
 import { forgetKey, renameAssignedKey } from "@/lib/resourceFolders";
@@ -85,7 +87,8 @@ import {
 import { loadAttributePresets, saveAttributePresets, type AttributePreset } from "@/lib/attributePresets";
 import { downloadBlob, downloadExport, downloadFullProjectExport } from "@/lib/exportBundle";
 import { buildBedrockAddon } from "@/lib/bedrockAddon";
-import { readSpecBundle, mergeSpecsById, type ImportCategory } from "@/lib/importBundle";
+import { readSpecBundle, readProjectScreens, readProjectFolders, readScreenExport, mergeSpecsById, type ImportCategory, type SpecBundle } from "@/lib/importBundle";
+import { detectImport } from "@/lib/importDetect";
 import { saveTexture, loadAllTextures } from "@/lib/textureStore";
 import { toast } from "sonner";
 import { genId, copyToClipboard } from "@/lib/utils";
@@ -95,6 +98,23 @@ function newId(type: string, existing: WidgetSpec[]): string {
   let n = 1;
   while (used.has(`${type}_${n}`)) n++;
   return `${type}_${n}`;
+}
+
+/**
+ * Whether anything in the project other than `self` refers to `id` (as "id" or "<namespace>:id"
+ * in some string value) — then a name change must not drag the id along.
+ */
+function isIdReferenced(entry: unknown, self: unknown, id: string): boolean {
+  const re = new RegExp(`"(?:[a-z0-9_.-]+:)?${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`);
+  return re.test(JSON.stringify(entry, (_k, v) => (v === self ? undefined : v)));
+}
+
+/** `next` with its id following its name change (see followLabelId), for the built-in categories. */
+function withFollowedId<T extends { id: string }>(entry: unknown, prev: T | undefined, next: T, labelKey: keyof T & string, prefix: string, list: T[]): T {
+  if (!prev || prev[labelKey] === next[labelKey] || next.id !== prev.id) return next;
+  const id = followLabelId(prev.id, String(prev[labelKey] ?? ""), String(next[labelKey] ?? ""), prefix,
+    list.filter((x) => x !== prev).map((x) => x.id), (old) => isIdReferenced(entry, prev, old));
+  return id ? { ...next, id } : next;
 }
 
 function newSpecId(prefix: string, existing: { id: string }[]): string {
@@ -343,9 +363,40 @@ function loadProjects(): StoredProject[] {
   }
 }
 
+/** Undo steps kept when a session is written to storage (the live editor keeps MAX_HISTORY). Every
+ * step is a full copy of the project, so persisting all 100 quickly outgrows localStorage's ~5 MB. */
+const PERSISTED_HISTORY = 10;
+
+/** The stored form of a session: the current state plus the last few undo steps (redo is dropped). */
+function persistableSession(s: SavedSession, keep = PERSISTED_HISTORY): SavedSession {
+  const cursor = Math.max(0, Math.min(s.cursor, s.history.length - 1));
+  const from = Math.max(0, cursor - (keep - 1));
+  return { ...s, history: s.history.slice(from, cursor + 1), cursor: cursor - from };
+}
+
+let quotaWarned = 0;
+
 function saveProjects(projects: StoredProject[]): void {
-  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch { /* quota */ }
-  cloudSaveProjects(projects);
+  const write = (list: StoredProject[]) => localStorage.setItem(PROJECTS_KEY, JSON.stringify(list));
+  const trimmed = projects.map((p) => ({ ...p, session: persistableSession(p.session) }));
+  try {
+    write(trimmed);
+  } catch {
+    // Still too big (e.g. older sessions saved with their full history): keep only every project's
+    // current state — no project is lost, just their stored undo steps.
+    const minimal = projects.map((p) => ({ ...p, session: persistableSession(p.session, 1) }));
+    try {
+      write(minimal);
+    } catch (e) {
+      // Never fail silently: unsaved local changes would be gone after a reload.
+      if (Date.now() - quotaWarned > 60_000) {
+        quotaWarned = Date.now();
+        toast.error("Browser storage is full — your latest changes are NOT saved in this browser. Export the project (Export Project) to be safe, or delete unused projects.", { duration: 15_000 });
+      }
+      console.error("saving projects failed", e);
+    }
+  }
+  cloudSaveProjects(trimmed);
 }
 
 
@@ -422,6 +473,9 @@ export default function EditorPage() {
   const mcVersion = entry.mcVersion;
   const activeElementRef = entry.activeElement;
   const activeElementDef = activeElementRef ? getElementKind(activeElementRef.kind) : undefined;
+  // Texture paths of the loaded vanilla pack (not the user's own custom/… images) — for pickers
+  // like the texture pack's "texture to replace".
+  const vanillaTextureKeys = useMemo(() => Object.keys(packTextures).filter((k) => !k.startsWith("custom/")).sort(), [packTextures]);
   const activeElement = activeElementRef ? (elements[activeElementRef.kind] ?? [])[activeElementRef.idx] ?? null : null;
   const activeDocType = entry.activeDocType;
   // Main-area browsers opened from the icon rail: the workspace overview ("All categories"), a
@@ -928,7 +982,8 @@ export default function EditorPage() {
   }, [entry, items, commit]);
 
   const updateItem = useCallback((updated: ItemSpec) => {
-    commit({ ...entry, items: items.map((it, i) => i === activeItemIdx ? updated : it) });
+    const next = withFollowedId(entry, items[activeItemIdx], updated, "displayName", "item", items);
+    commit({ ...entry, items: items.map((it, i) => i === activeItemIdx ? next : it) });
   }, [entry, items, activeItemIdx, commit]);
 
   const switchBlock = useCallback((idx: number) => {
@@ -960,7 +1015,8 @@ export default function EditorPage() {
   }, [entry, blocks, commit]);
 
   const updateBlock = useCallback((updated: BlockSpec) => {
-    commit({ ...entry, blocks: blocks.map((b, i) => i === activeBlockIdx ? updated : b) });
+    const next = withFollowedId(entry, blocks[activeBlockIdx], updated, "displayName", "block", blocks);
+    commit({ ...entry, blocks: blocks.map((b, i) => i === activeBlockIdx ? next : b) });
   }, [entry, blocks, activeBlockIdx, commit]);
 
   const addCreativeTab = useCallback(() => {
@@ -1073,7 +1129,7 @@ export default function EditorPage() {
   }, [entry, effects, commit]);
 
   const updateEffect = useCallback((idx: number, patch: Partial<EffectSpec>) => {
-    commit({ ...entry, effects: effects.map((e, i) => i === idx ? { ...e, ...patch } : e) });
+    commit({ ...entry, effects: effects.map((e, i) => i === idx ? withFollowedId(entry, e, { ...e, ...patch }, "displayName", "effect", effects) : e) });
   }, [entry, effects, commit]);
 
   const removeEffect = useCallback((idx: number) => {
@@ -1096,7 +1152,7 @@ export default function EditorPage() {
   }, [entry, potions, commit]);
 
   const updatePotion = useCallback((idx: number, patch: Partial<PotionSpec>) => {
-    commit({ ...entry, potions: potions.map((p, i) => i === idx ? { ...p, ...patch } : p) });
+    commit({ ...entry, potions: potions.map((p, i) => i === idx ? withFollowedId(entry, p, { ...p, ...patch }, "displayName", "potion", potions) : p) });
   }, [entry, potions, commit]);
 
   const duplicatePotion = useCallback((idx: number) => {
@@ -1127,7 +1183,7 @@ export default function EditorPage() {
   }, [entry, achievements, commit]);
 
   const updateAchievement = useCallback((idx: number, patch: Partial<AchievementSpec>) => {
-    commit({ ...entry, achievements: achievements.map((a, i) => i === idx ? { ...a, ...patch } : a) });
+    commit({ ...entry, achievements: achievements.map((a, i) => i === idx ? withFollowedId(entry, a, { ...a, ...patch }, "title", "achievement", achievements) : a) });
   }, [entry, achievements, commit]);
 
   const duplicateAchievement = useCallback((idx: number) => {
@@ -1313,7 +1369,7 @@ export default function EditorPage() {
   }, [entry, armors, commit]);
 
   const updateArmor = useCallback((idx: number, patch: Partial<ArmorSpec>) => {
-    commit({ ...entry, armors: armors.map((a, i) => i === idx ? { ...a, ...patch } : a) });
+    commit({ ...entry, armors: armors.map((a, i) => i === idx ? withFollowedId(entry, a, { ...a, ...patch }, "displayName", "armor", armors) : a) });
   }, [entry, armors, commit]);
 
   const duplicateArmor = useCallback((idx: number) => {
@@ -2227,77 +2283,169 @@ export default function EditorPage() {
     importCategoryInputRef.current?.click();
   };
 
-  // Counterpart to the per-category "Export all": merges a category's zip/json into the current
-  // project (by id) instead of replacing the whole project like "Import project" does.
+  // Counterpart to the per-category "Export all": merges a category's zip/json into the project
+  // (by id) instead of replacing the whole project like "Import project" does.
+  const norm = <T extends { id: string }>(fn: (s: T) => T) => (raw: Record<string, unknown>) => fn(raw as unknown as T);
+  const IMPORT_TARGETS: Record<Exclude<ImportCategory, `element:${string}`>, {
+    normalize: (raw: Record<string, unknown>) => { id: string }; activeKey: string; docType: ActiveDocType;
+  }> = {
+    items: { normalize: norm(normalizeItem), activeKey: "activeItemIdx", docType: "item" },
+    blocks: { normalize: norm(normalizeBlock), activeKey: "activeBlockIdx", docType: "block" },
+    armors: { normalize: norm(normalizeArmor), activeKey: "activeArmorIdx", docType: "armor" },
+    customAttributes: { normalize: norm((a: CustomAttributeSpec) => ({ ...defaultCustomAttribute(a.id), ...a })), activeKey: "activeAttributeIdx", docType: "attribute" },
+    effects: { normalize: norm(normalizeEffect), activeKey: "activeEffectIdx", docType: "effect" },
+    potions: { normalize: norm(normalizePotion), activeKey: "activePotionIdx", docType: "potion" },
+    achievements: { normalize: norm(normalizeAchievement), activeKey: "activeAchievementIdx", docType: "achievement" },
+    recipes: { normalize: norm(normalizeRecipe), activeKey: "activeRecipeIdx", docType: "recipe" },
+    trades: { normalize: norm(normalizeTrade), activeKey: "activeTradeIdx", docType: "trade" },
+    lootEntries: { normalize: norm(normalizeLootEntry), activeKey: "activeLootEntryIdx", docType: "loot" },
+    biomes: { normalize: norm(normalizeBiome), activeKey: "activeBiomeIdx", docType: "biome" },
+    dimensions: { normalize: norm(normalizeDimension), activeKey: "activeDimensionIdx", docType: "dimension" },
+  };
+
+  // Newest history entry — bridge commands and multi-file imports arrive faster than React
+  // re-renders, so they read and write this instead of the render's `entry`.
+  const latestEntryRef = useRef(entry);
+  useEffect(() => { latestEntryRef.current = entry; }, [entry]);
+
+  /** Merges one category's bundle into `base` by id; returns the new entry and what changed. */
+  function mergeBundle(base: HistoryEntry, category: ImportCategory, bundle: SpecBundle): { next: HistoryEntry; added: number; updated: number } {
+    if (category.startsWith("element:")) {
+      const kind = category.slice("element:".length);
+      const def = getElementKind(kind);
+      if (!def) return { next: base, added: 0, updated: 0 };
+      const merged = mergeSpecsById(base.elements[kind] ?? [], bundle.specs.map((raw) => normalizeElement(def, raw as ElementSpec)));
+      return { next: { ...base, elements: { ...base.elements, [kind]: merged.list } }, added: merged.added, updated: merged.updated };
+    }
+    const key = category as keyof typeof IMPORT_TARGETS;
+    const target = IMPORT_TARGETS[key];
+    const merged = mergeSpecsById(base[key] as { id: string }[], bundle.specs.map(target.normalize));
+    return {
+      next: { ...base, [key]: merged.list, [target.activeKey]: merged.firstIdx, activeDocType: target.docType } as HistoryEntry,
+      added: merged.added, updated: merged.updated,
+    };
+  }
+
+  /** Only fills gaps — never overwrites a texture this browser already has under that path. */
+  async function storeMissingTextures(textures: Record<string, Blob>): Promise<number> {
+    const missing = Object.entries(textures).filter(([src]) => !packTextures[src]);
+    for (const [src, blob] of missing) await saveTexture(`pack:${src}`, blob);
+    if (missing.length > 0) await reloadTextures();
+    return missing.length;
+  }
+
+  async function importCategoryFile(file: File, category: ImportCategory) {
+    const bundle = await readSpecBundle(file, category);
+    if (bundle.specs.length === 0) throw new Error("No entries found in this file.");
+    const textures = await storeMissingTextures(bundle.textures);
+    // Newest state, not this render's: several files dropped at once are merged one after the
+    // other, and each must build on the previous one (or it would overwrite it).
+    const { next, added, updated } = mergeBundle(latestEntryRef.current, category, bundle);
+    latestEntryRef.current = next;
+    commit(next);
+    const parts = [`${added} added`];
+    if (updated > 0) parts.push(`${updated} updated (same id)`);
+    if (textures > 0) parts.push(`${textures} texture(s)`);
+    if (bundle.skipped > 0) parts.push(`${bundle.skipped} skipped (no id)`);
+    return parts.join(", ");
+  }
+
   const handleImportCategoryFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     const category = importCategoryRef.current;
     if (!file || !category) return;
-
-    if (category.startsWith("element:")) {
-      const kind = category.slice("element:".length);
-      const def = getElementKind(kind);
-      if (!def) return;
-      try {
-        const bundle = await readSpecBundle(file, category);
-        if (bundle.specs.length === 0) throw new Error("No entries found in this file.");
-        const merged = mergeSpecsById(elements[kind] ?? [], bundle.specs.map((raw) => normalizeElement(def, raw as ElementSpec)));
-        commit({ ...entry, elements: { ...elements, [kind]: merged.list } });
-        const parts = [`${merged.added} added`];
-        if (merged.updated > 0) parts.push(`${merged.updated} updated (same id)`);
-        if (bundle.skipped > 0) parts.push(`${bundle.skipped} skipped (no id)`);
-        toast.success(`Imported: ${parts.join(", ")}.`);
-      } catch (err) {
-        toast.error(`Could not import: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return;
-    }
-
-    const norm = <T extends { id: string }>(fn: (s: T) => T) => (raw: Record<string, unknown>) => fn(raw as unknown as T);
-    const targets: Record<ImportCategory, {
-      list: { id: string }[]; normalize: (raw: Record<string, unknown>) => { id: string }; activeKey: string; docType: ActiveDocType;
-    }> = {
-      items: { list: items, normalize: norm(normalizeItem), activeKey: "activeItemIdx", docType: "item" },
-      blocks: { list: blocks, normalize: norm(normalizeBlock), activeKey: "activeBlockIdx", docType: "block" },
-      armors: { list: armors, normalize: norm(normalizeArmor), activeKey: "activeArmorIdx", docType: "armor" },
-      customAttributes: {
-        list: customAttributes,
-        normalize: norm((a: CustomAttributeSpec) => ({ ...defaultCustomAttribute(a.id), ...a })),
-        activeKey: "activeAttributeIdx", docType: "attribute",
-      },
-      effects: { list: effects, normalize: norm(normalizeEffect), activeKey: "activeEffectIdx", docType: "effect" },
-      potions: { list: potions, normalize: norm(normalizePotion), activeKey: "activePotionIdx", docType: "potion" },
-      achievements: { list: achievements, normalize: norm(normalizeAchievement), activeKey: "activeAchievementIdx", docType: "achievement" },
-      recipes: { list: recipes, normalize: norm(normalizeRecipe), activeKey: "activeRecipeIdx", docType: "recipe" },
-      trades: { list: trades, normalize: norm(normalizeTrade), activeKey: "activeTradeIdx", docType: "trade" },
-      lootEntries: { list: lootEntries, normalize: norm(normalizeLootEntry), activeKey: "activeLootEntryIdx", docType: "loot" },
-      biomes: { list: biomes, normalize: norm(normalizeBiome), activeKey: "activeBiomeIdx", docType: "biome" },
-      dimensions: { list: dimensions, normalize: norm(normalizeDimension), activeKey: "activeDimensionIdx", docType: "dimension" },
-    };
-    const target = targets[category];
-
     try {
-      const bundle = await readSpecBundle(file, category);
-      if (bundle.specs.length === 0) throw new Error("No entries found in this file.");
-
-      // Only fill gaps — never overwrite a texture this browser already has under that path.
-      const missing = Object.entries(bundle.textures).filter(([src]) => !packTextures[src]);
-      for (const [src, blob] of missing) await saveTexture(`pack:${src}`, blob);
-      if (missing.length > 0) await reloadTextures();
-
-      const merged = mergeSpecsById(target.list, bundle.specs.map(target.normalize));
-      commit({ ...entry, [category]: merged.list, [target.activeKey]: merged.firstIdx, activeDocType: target.docType });
-
-      const parts = [`${merged.added} added`];
-      if (merged.updated > 0) parts.push(`${merged.updated} updated (same id)`);
-      if (missing.length > 0) parts.push(`${missing.length} texture(s)`);
-      if (bundle.skipped > 0) parts.push(`${bundle.skipped} skipped (no id)`);
-      toast.success(`Imported: ${parts.join(", ")}.`);
+      toast.success(`Imported: ${await importCategoryFile(file, category)}.`);
     } catch (err) {
       toast.error(`Could not import: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  /** Screens from a screen JSON (one or a list): added next to the existing ones, ids de-duplicated. */
+  function screensFromJson(json: unknown, existing: ScreenSpec[] = screens): ScreenSpec[] {
+    const list = Array.isArray(json) ? json : [json];
+    const taken = new Set(existing.map((s) => s.id));
+    return list.map((raw) => {
+      const parsed = normalizeScreen(migrateScreenJson(raw as Record<string, unknown>));
+      if (!parsed.id || !Array.isArray(parsed.widgets)) throw new Error("Invalid ScreenSpec");
+      let id = parsed.id;
+      for (let n = 2; taken.has(id); n++) id = `${parsed.id}_${n}`;
+      taken.add(id);
+      return { ...parsed, id };
+    });
+  }
+
+  /** A full-project export, merged category by category (unlike "Import project", which replaces). */
+  async function mergeProjectFile(file: File): Promise<string> {
+    let next = latestEntryRef.current;
+    let added = 0, updated = 0, textures = 0;
+    const categories: ImportCategory[] = [
+      ...(Object.keys(IMPORT_TARGETS) as ImportCategory[]),
+      ...ELEMENT_KINDS.map((d) => `element:${d.kind}` as ImportCategory),
+    ];
+    for (const category of categories) {
+      let bundle: SpecBundle;
+      try { bundle = await readSpecBundle(file, category); } catch { continue; }
+      if (bundle.specs.length === 0) continue;
+      textures += await storeMissingTextures(bundle.textures);
+      const r = mergeBundle(next, category, bundle);
+      next = r.next; added += r.added; updated += r.updated;
+    }
+    // screens live in the project JSON itself
+    const projectScreens = await readProjectScreens(file);
+    const newScreens = projectScreens.length ? screensFromJson(projectScreens, next.screens) : [];
+    if (newScreens.length) next = { ...next, screens: [...next.screens, ...newScreens] };
+    // Category folders listed in the export (also empty ones) join the project's folders.
+    const folders = await readProjectFolders(file);
+    let newFolders = 0;
+    if (Object.keys(folders).length) {
+      const mergedFolders = { ...(next.elementFolders ?? {}) };
+      for (const [key, names] of Object.entries(folders)) {
+        const have = mergedFolders[key] ?? [];
+        const add = names.filter((n) => !have.includes(n));
+        newFolders += add.length;
+        if (add.length) mergedFolders[key] = [...have, ...add];
+      }
+      next = { ...next, elementFolders: mergedFolders };
+    }
+    latestEntryRef.current = next;
+    commit(next);
+    const parts = [`${added} added`];
+    if (updated > 0) parts.push(`${updated} updated (same id)`);
+    if (newScreens.length) parts.push(`${newScreens.length} screen(s)`);
+    if (newFolders) parts.push(`${newFolders} folder(s)`);
+    if (textures > 0) parts.push(`${textures} texture(s)`);
+    return parts.join(", ");
+  }
+
+  /** Drag & drop anywhere on the editor: works out what a dropped export is and merges it there. */
+  async function importDroppedFile(file: File) {
+    try {
+      const { target, reason } = await detectImport(file);
+      let summary: string;
+      let where: string;
+      if (target === "project") {
+        summary = await mergeProjectFile(file);
+        where = "project";
+      } else if (target === "screens") {
+        const base = latestEntryRef.current;
+        const added = screensFromJson(await readScreenExport(file), base.screens);
+        const next: HistoryEntry = { ...base, screens: [...base.screens, ...added], activeIdx: base.screens.length, activeDocType: "screen" };
+        latestEntryRef.current = next;
+        commit(next);
+        setSelectedId(null);
+        summary = `${added.length} screen(s) added`;
+        where = sectionLabel("screens");
+      } else {
+        summary = await importCategoryFile(file, target);
+        where = target.startsWith("element:") ? sectionLabel(`el:${target.slice("element:".length)}`) : sectionLabel(target as SectionKey);
+      }
+      toast.success(`Imported into ${where} (${reason}): ${summary}.`);
+    } catch (err) {
+      toast.error(`Could not import ${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   const handleSaveToTestMod = useCallback(async () => {
     try {
@@ -2317,8 +2465,6 @@ export default function EditorPage() {
   const bridgeEnabled = useBridgeEnabled();
   // Bridge commands can arrive faster than React re-renders: they read and write this ref, which
   // always holds the newest history entry (synced from renders, e.g. after the user's undo).
-  const latestEntryRef = useRef(entry);
-  useEffect(() => { latestEntryRef.current = entry; }, [entry]);
   const commitLatest = (fn: (cur: HistoryEntry) => HistoryEntry) => {
     const next = fn(latestEntryRef.current);
     latestEntryRef.current = next;
@@ -2369,6 +2515,41 @@ export default function EditorPage() {
     () => ({ project: projectKey, modId: friendlyModId() }),
   );
 
+  // Drag & drop import: any .zip/.json export dropped anywhere on the editor is detected and merged
+  // (images keep going to whatever handles them, e.g. the Resources library). Capture phase, so a
+  // panel's own drop handler never sees an export.
+  const [dropActive, setDropActive] = useState(false);
+  const importDroppedRef = useRef(importDroppedFile);
+  useEffect(() => { importDroppedRef.current = importDroppedFile; });
+  useEffect(() => {
+    const EXPORT_TYPES = new Set(["application/zip", "application/x-zip-compressed", "application/json", ""]);
+    const carriesExport = (dt: DataTransfer | null) =>
+      !!dt && [...dt.items].some((i) => i.kind === "file" && EXPORT_TYPES.has(i.type));
+    let depth = 0;
+    const onEnter = (e: DragEvent) => { if (carriesExport(e.dataTransfer)) { depth++; setDropActive(true); } };
+    const onLeave = () => { depth = Math.max(0, depth - 1); if (depth === 0) setDropActive(false); };
+    const onOver = (e: DragEvent) => { if (carriesExport(e.dataTransfer)) e.preventDefault(); };
+    const onDrop = (e: DragEvent) => {
+      depth = 0;
+      setDropActive(false);
+      const files = [...(e.dataTransfer?.files ?? [])].filter((f) => /\.(zip|json)$/i.test(f.name));
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void (async () => { for (const f of files) await importDroppedRef.current(f); })();
+    };
+    window.addEventListener("dragenter", onEnter, true);
+    window.addEventListener("dragleave", onLeave, true);
+    window.addEventListener("dragover", onOver, true);
+    window.addEventListener("drop", onDrop, true);
+    return () => {
+      window.removeEventListener("dragenter", onEnter, true);
+      window.removeEventListener("dragleave", onLeave, true);
+      window.removeEventListener("dragover", onOver, true);
+      window.removeEventListener("drop", onDrop, true);
+    };
+  }, []);
+
   if (!projectLoaded || !initialized) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-200">
@@ -2379,6 +2560,14 @@ export default function EditorPage() {
 
   return (
     <>
+      {dropActive && (
+        <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-6" data-testid="drop-import-overlay">
+          <div className="rounded-lg border-2 border-dashed border-primary bg-card px-8 py-6 text-center shadow-lg">
+            <div className="text-base font-semibold">Drop to import</div>
+            <div className="mt-1 text-xs text-muted-foreground">Any export (.zip / .json) — blocks, items, screens, a whole project … it goes where it belongs.</div>
+          </div>
+        </div>
+      )}
       <TexturePickerModal
         open={showTextureDebug}
         packTextures={packTextures}
@@ -2492,10 +2681,26 @@ export default function EditorPage() {
               onApplyToArmor={(idx, patch) => commit({ ...entry, armors: armors.map((a, i) => i === idx ? { ...a, ...patch } : a) })}
               onOpenArmor={(idx) => { setMainView(null); switchArmor(idx); }}
             />
+          ) : activeMainView === "guiGenerator" ? (
+            <ScreenGuiGeneratorPanel
+              screens={screens}
+              onAddToScreen={(idx, src, w, h) => {
+                // as the bottom-most widget, centred: a background the rest of the screen sits on
+                const sc = screens[idx];
+                const widget: WidgetSpec = {
+                  type: "sprite", id: newId("sprite", sc.widgets),
+                  x: Math.max(0, Math.round((sc.width - w) / 2)), y: Math.max(0, Math.round((sc.height - h) / 2)), w, h,
+                  text: "", icon: null, props: { src, fit: "fill" },
+                };
+                commit({ ...entry, screens: screens.map((s, i) => i === idx ? { ...s, widgets: [widget, ...s.widgets] } : s) });
+              }}
+              onOpenScreen={(idx) => { setMainView(null); switchScreen(idx); }}
+            />
           ) : activeMainView === "modelGenerator" ? (
             <EntityModelGeneratorPanel
               activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
               onOpenModels={() => setMainView({ kind: "section", key: "el:entityModel" })}
+              runEditorTool={(tool, args) => runTool(() => editorApiRef.current(), tool, args)}
             />
           ) : mainView?.kind === "section" && !isToolSection(mainView.key) ? (
             // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
@@ -2578,6 +2783,7 @@ export default function EditorPage() {
                   projectItems: items.map((it) => `${friendlyModId()}:${it.id}`),
                   projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
                   projectScreens: screens.map((s) => s.id),
+                  packTextureKeys: vanillaTextureKeys,
                   elementIds: Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])),
                 }}
               />
@@ -2595,8 +2801,11 @@ export default function EditorPage() {
                         projectItems: items.map((it) => `${friendlyModId()}:${it.id}`),
                         projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
                         projectScreens: screens.map((s) => s.id),
+                        packTextureKeys: vanillaTextureKeys,
                       }}
-                      onChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx, patch)}
+                      onChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx,
+                        withLabelId(activeElementDef, activeElement, patch, elements[activeElementDef.kind] ?? [],
+                          (old) => isIdReferenced(entry, activeElement, old)))}
                     />
                   ) : (
                     <div className="p-6 text-sm text-muted-foreground">This element no longer exists — pick another one from the sidebar.</div>
@@ -2613,6 +2822,7 @@ export default function EditorPage() {
                     attribute={activeCustomAttribute}
                     onUpdate={(patch) => updateCustomAttribute(activeAttributeIdx, patch)}
                     onRenameId={(id) => renameCustomAttributeId(activeAttributeIdx, id)}
+                    modId={friendlyModId()}
                   />
                 </div>
               </div>
@@ -2622,6 +2832,8 @@ export default function EditorPage() {
                   <EffectPropertyPanel
                     effect={activeEffect}
                     customAttributes={customAttributes}
+                    modId={friendlyModId()}
+                    onEditCustomAttribute={(id) => { const i = customAttributes.findIndex((a) => a.id === id); if (i >= 0) switchCustomAttribute(i); }}
                     onUpdate={(patch) => updateEffect(activeEffectIdx, patch)}
                     onOpenTextureEditor={() => openTextureEditor({ docType: "effect", index: activeEffectIdx })}
                   />
@@ -2739,6 +2951,8 @@ export default function EditorPage() {
                     onUpdate={(spec) => activeDocType === "item" ? updateItem(spec as ItemSpec) : updateBlock(spec as BlockSpec)}
                     creativeTabs={creativeTabs}
                     customAttributes={customAttributes}
+                    modId={friendlyModId()}
+                    onEditCustomAttribute={(id) => { const i = customAttributes.findIndex((a) => a.id === id); if (i >= 0) switchCustomAttribute(i); }}
                     onOpenTextureEditor={() => openTextureEditor({ docType: activeDocType as "item" | "block", index: activeDocType === "item" ? activeItemIdx : activeBlockIdx })}
                   />
                 </div>

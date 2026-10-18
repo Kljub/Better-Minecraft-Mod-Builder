@@ -191,3 +191,56 @@ test("model editor: settings tab edits death and hurt drops", async ({ page }) =
   await expect(page.getByTestId("entity-settings").locator('[data-field="drops"] [data-field="item"] input')).toHaveValue("minecraft:bone");
   await expect(page.getByTestId("entity-settings").locator('[data-field="drops"] [data-field="max"] input')).toHaveValue("3");
 });
+
+test("model editor: start from a vanilla Minecraft mob (geometry + texture loaded from Mojang's bedrock-samples)", async ({ page }) => {
+  const { PNG } = await import("pngjs");
+  const png = new PNG({ width: 64, height: 32 });
+  png.data.fill(200);
+  const geo = {
+    format_version: "1.8.0",
+    "geometry.zombie.v1.8": { texturewidth: 64, textureheight: 32, bones: [
+      { name: "body", pivot: [0, 24, 0], cubes: [{ origin: [-4, 12, -2], size: [8, 12, 4], uv: [16, 16] }] },
+      { name: "head", parent: "body", pivot: [0, 24, 0], cubes: [{ origin: [-4, 24, -4], size: [8, 8, 8], uv: [0, 0] }] },
+      { name: "rightArm", parent: "body", pivot: [-5, 22, 0], cubes: [{ origin: [-8, 12, -2], size: [4, 12, 4], uv: [40, 16] }] },
+    ] },
+  };
+  const requested: string[] = [];
+  await page.route("https://raw.githubusercontent.com/Mojang/bedrock-samples/**", (route) => {
+    const url = route.request().url();
+    requested.push(url.split("/resource_pack/")[1]);
+    if (url.endsWith(".geo.json")) return route.fulfill({ body: "// legacy\n" + JSON.stringify(geo), contentType: "application/json", headers: { "access-control-allow-origin": "*" } });
+    return route.fulfill({ body: PNG.sync.write(png), contentType: "image/png", headers: { "access-control-allow-origin": "*" } });
+  });
+  await newModel(page);
+  await page.getByRole("button", { name: "From Minecraft" }).click();
+  const dialog = page.getByTestId("vanilla-mob-dialog");
+  await dialog.getByLabel("Search mobs").fill("zombie");
+  await dialog.getByRole("button", { name: "Zombie", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  const outliner = page.getByTestId("model-outliner");
+  for (const bone of ["body", "head", "rightArm"]) await expect(outliner).toContainText(bone);
+  expect(requested).toEqual(expect.arrayContaining(["models/entity/zombie.geo.json", "textures/entity/zombie/zombie.png"]));
+});
+
+test("model editor: rewrite the selected animation with AI (one undo step)", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("mc-ui-builder:ai-settings", JSON.stringify({
+    clients: { claude: { enabled: true, model: "" }, codex: { enabled: false, model: "" }, ollama: { enabled: false, model: "" } }, preferred: "claude",
+  })));
+  let sent: { task?: string; prompt?: string; context?: { bones?: { name: string }[]; animation?: unknown } } = {};
+  await page.route("**/api/ai/generate", async (route) => {
+    sent = route.request().postDataJSON();
+    await route.fulfill({ json: { name: "idle", length: 2, loop: "loop", channels: [
+      { bone: "body", channel: "position", keyframes: [{ t: 0, x: 0, y: 0, z: 0, i: "catmullrom" }, { t: 1, x: 0, y: 2, z: 0, i: "catmullrom" }, { t: 2, x: 0, y: 0, z: 0, i: "catmullrom" }] },
+    ] } });
+  });
+  await newModel(page);
+  await page.getByRole("tab", { name: "Animation" }).click();
+  const bar = page.getByTestId("animation-ai");
+  await bar.getByLabel("Animation request").fill("a bouncy idle");
+  await bar.getByRole("button", { name: /Create|Rewrite/ }).click();
+  await expect(page.getByText(/Ctrl\+Z undoes it/)).toBeVisible();
+  expect(sent.task).toBe("animation");
+  expect(sent.prompt).toBe("a bouncy idle");
+  expect(sent.context?.bones?.map((b) => b.name)).toContain("body");
+  await expect(page.getByTestId("animation-timeline")).toContainText("idle");
+});

@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
-import { mkdtemp, readFile, rm, writeFile } from "fs/promises";
-import { tmpdir } from "os";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "fs/promises";
+import { homedir, tmpdir } from "os";
 import { join } from "path";
 import type { Quota, RunAccount } from "@/lib/server/aiAccounts";
 import { claudeQuota } from "@/lib/server/aiAccounts";
@@ -15,6 +15,10 @@ import { claudeQuota } from "@/lib/server/aiAccounts";
  * - ollama: plain HTTP to the local Ollama server (OLLAMA_HOST, default 127.0.0.1:11434) — the
  *   URL is server config on purpose, never taken from the request.
  * All are given a JSON Schema so the answer comes back as structured output.
+ *
+ * runCodexImage is the one exception: codex's built-in image_gen tool (gpt-image, on the ChatGPT
+ * login), same read-only sandbox. Codex saves what it generates under
+ * $CODEX_HOME/generated_images/<thread id>/ — read from there and deleted afterwards.
  */
 export type CliProvider = "claude" | "codex" | "ollama";
 
@@ -102,6 +106,8 @@ function lastLines(s: string, n = 5) {
   return s.trim().split("\n").slice(-n).join("\n");
 }
 
+export interface StructuredImage { mediaType: string; data: string; label?: string }
+
 export async function runStructured(
   provider: CliProvider,
   model: string,
@@ -111,6 +117,8 @@ export async function runStructured(
   /** a linked account (Settings → AI) instead of the host's own CLI login */
   account?: RunAccount,
   onQuota?: (q: Quota) => void,
+  /** reference images (base64 without data: prefix), e.g. renders of a 3D model to rig */
+  images: StructuredImage[] = [],
 ): Promise<unknown> {
   if (provider === "ollama") {
     const name = model || (await ollamaModels())?.[0];
@@ -123,7 +131,7 @@ export async function runStructured(
         stream: false,
         format: schema,
         options: { temperature: 0.4 },
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        messages: [{ role: "system", content: system }, { role: "user", content: prompt, ...(images.length ? { images: images.map((i) => i.data) } : {}) }],
       }),
     }, TIMEOUT_MS);
     try { return JSON.parse(out.message?.content ?? ""); }
@@ -139,7 +147,19 @@ export async function runStructured(
         "--system-prompt", system, "--json-schema", JSON.stringify(schema),
       ];
       if (model) args.push("--model", model);
-      const { code, stdout, stderr } = await run("claude", args, { stdin: prompt, cwd: dir, env: account?.env });
+      let stdin = prompt;
+      if (images.length) {
+        // Images go in as content blocks of one stream-json user message, each after its label.
+        args.push("--input-format", "stream-json");
+        stdin = JSON.stringify({ type: "user", message: { role: "user", content: [
+          ...images.flatMap((img) => [
+            ...(img.label ? [{ type: "text", text: `${img.label}:` }] : []),
+            { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
+          ]),
+          { type: "text", text: prompt },
+        ] } }) + "\n";
+      }
+      const { code, stdout, stderr } = await run("claude", args, { stdin, cwd: dir, env: account?.env });
       type ResultEvent = { is_error?: boolean; result?: string; structured_output?: unknown };
       let out: ResultEvent | null = null;
       for (const line of stdout.split("\n")) {
@@ -165,12 +185,65 @@ export async function runStructured(
     // then deleted); with the host login, keep nothing.
     if (!account) args.push("--ephemeral");
     if (model) args.push("-m", model);
+    for (const [i, img] of images.entries()) {
+      const file = join(dir, `image-${i + 1}.${img.mediaType === "image/jpeg" ? "jpg" : img.mediaType.split("/")[1]}`);
+      await writeFile(file, Buffer.from(img.data, "base64"));
+      args.push("-i", file);
+    }
     args.push("-");
+    const imageList = images.length ? `\n\nAttached images, in order:\n${images.map((img, i) => `${i + 1}. ${img.label || "image"}`).join("\n")}` : "";
     // codex exec has no system-prompt flag — instructions go in front of the request.
-    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}`, cwd: dir, env: account?.env });
+    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}${imageList}`, cwd: dir, env: account?.env });
     if (code !== 0) throw new Error(`codex failed: ${lastLines(stderr || stdout)}`);
     return JSON.parse(await readFile(outPath, "utf-8"));
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+}
+
+const IMAGE_TIMEOUT_MS = 420_000;
+
+/** Generates `count` images with codex's image_gen tool — or edits `image` (PNG) when given — and
+ * returns the PNGs. Takes ~40 s per image. */
+/** With a linked account (Settings → AI) the run uses its private CODEX_HOME — images and the
+ * session with its rate limits land there (finish() reads the quota, then deletes it). */
+export async function runCodexImage(prompt: string, count: number, image?: Buffer, account?: RunAccount): Promise<Buffer[]> {
+  const dir = await mkdtemp(join(tmpdir(), "mc-ui-img-"));
+  let threadDir: string | null = null;
+  try {
+    const args = ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "--color", "never", "--ignore-user-config", "--json"];
+    if (!account) args.push("--ephemeral");
+    if (image) {
+      await writeFile(join(dir, "input.png"), image);
+      args.push("-i", join(dir, "input.png"));
+    }
+    args.push("-");
+    const task = image
+      ? `Use the image_gen tool ${count === 1 ? "once" : `exactly ${count} times (independent variations)`} to edit the attached image: ${prompt}`
+      : `Use the image_gen tool ${count === 1 ? "once" : `exactly ${count} times (independent variations)`} to generate: ${prompt}`;
+    const { code, stdout, stderr } = await run("codex", args, {
+      stdin: `${task}\n\nDo not write or modify any files. When done, reply with OK.`,
+      cwd: dir,
+      timeoutMs: IMAGE_TIMEOUT_MS,
+      env: account?.env,
+    });
+    let threadId: string | null = null;
+    for (const line of stdout.split("\n")) {
+      try {
+        const ev = JSON.parse(line) as { type?: string; thread_id?: string };
+        if (ev.type === "thread.started" && ev.thread_id) threadId = ev.thread_id;
+      } catch { /* not JSON */ }
+    }
+    if (code !== 0 || !threadId) throw new Error(`codex failed: ${lastLines(stderr || stdout)}`);
+    // the thread id comes from codex's own output; still keep it to a safe charset for the path
+    if (!/^[\w-]+$/.test(threadId)) throw new Error("codex returned an unexpected thread id");
+    threadDir = join(account?.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex"), "generated_images", threadId);
+    let files: string[] = [];
+    try { files = (await readdir(threadDir)).filter((f) => f.endsWith(".png")).sort(); } catch { /* none */ }
+    if (files.length === 0) throw new Error("codex finished without generating an image (image generation may be unavailable for this login)");
+    return Promise.all(files.map((f) => readFile(join(threadDir!, f))));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    if (threadDir) await rm(threadDir, { recursive: true, force: true });
   }
 }

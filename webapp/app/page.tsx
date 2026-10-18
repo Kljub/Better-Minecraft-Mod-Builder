@@ -1,5 +1,7 @@
 "use client";
 
+import { toast } from "sonner";
+
 import { cloudSaveProjects, cloudDeleteProject } from "@/lib/cloud/sync";
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -116,9 +118,29 @@ function loadProjects(): StoredProject[] {
   }
 }
 
+/** Same storage policy as the editor (app/editor/[key]/page.tsx): store each project's current
+ * state + its last few undo steps; if the browser's storage is still full, only the current state;
+ * never fail silently. */
 function saveProjects(projects: StoredProject[]): void {
-  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch { /* quota */ }
-  cloudSaveProjects(projects);
+  const keep = (p: StoredProject, n: number): StoredProject => {
+    const { history, cursor } = p.session;
+    const c = Math.max(0, Math.min(cursor, history.length - 1));
+    const from = Math.max(0, c - (n - 1));
+    return { ...p, session: { ...p.session, history: history.slice(from, c + 1), cursor: c - from } };
+  };
+  const write = (list: StoredProject[]) => localStorage.setItem(PROJECTS_KEY, JSON.stringify(list));
+  const trimmed = projects.map((p) => keep(p, 10));
+  try {
+    write(trimmed);
+  } catch {
+    try {
+      write(projects.map((p) => keep(p, 1)));
+    } catch (e) {
+      console.error("saving projects failed", e);
+      toast.error("Browser storage is full — the project list could not be saved. Export important projects and delete unused ones.", { duration: 15_000 });
+    }
+  }
+  cloudSaveProjects(trimmed);
 }
 
 function toSummaries(projects: StoredProject[]): ProjectSummary[] {

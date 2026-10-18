@@ -5,7 +5,7 @@ import type { EffectSpec, AttributeModifierSpec, CustomAttributeSpec } from "@/l
 import { Input } from "@/components/ui/input";
 import { Field, PropSelect, Toggle, HexColorField, TextureField, ItemIdField } from "@/components/SchemaFields";
 import AttributeModifierListEditor from "@/components/AttributeModifierListEditor";
-import { ATTRIBUTE_OPTIONS } from "@/lib/itemRegistry";
+import { ATTRIBUTE_OPTIONS, attributeLabels as attributeLabelsFor } from "@/lib/itemRegistry";
 import { EFFECT_PARTICLE_OPTIONS, EFFECT_PARTICLE_LABELS, EFFECT_ADD_SOUND_OPTIONS } from "@/lib/effectRegistry";
 import { useTextures } from "@/lib/TextureContext";
 import TexturePickerModal from "@/components/TexturePickerModal";
@@ -14,6 +14,9 @@ interface Props {
   effect: EffectSpec | null;
   customAttributes: CustomAttributeSpec[];
   onUpdate: (patch: Partial<EffectSpec>) => void;
+  /** shown as the namespace of custom attributes ("<modid>:<id>") */
+  modId?: string;
+  onEditCustomAttribute?: (id: string) => void;
   onOpenTextureEditor: () => void;
 }
 
@@ -24,7 +27,7 @@ interface Props {
  * deliberately left out: "render in inventory/HUD" and "cured by honey" are not properties of the
  * effect *type* in this MC version — they live on MobEffectInstance (set per-application, e.g. by
  * a command's hideParticles flag) or aren't backed by any field at all, respectively. */
-export default function EffectPropertyPanel({ effect, customAttributes, onUpdate, onOpenTextureEditor }: Props) {
+export default function EffectPropertyPanel({ effect, customAttributes, onUpdate, onOpenTextureEditor, modId, onEditCustomAttribute }: Props) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [texPickerOpen, setTexPickerOpen] = useState(false);
 
@@ -39,7 +42,7 @@ export default function EffectPropertyPanel({ effect, customAttributes, onUpdate
   const attributes = effect.attributes ?? [];
   const setAttributes = (next: AttributeModifierSpec[]) => onUpdate({ attributes: next });
   const attributeOptions = [...ATTRIBUTE_OPTIONS, ...customAttributes.map((a) => a.id)];
-  const attributeLabels = Object.fromEntries(customAttributes.map((a) => [a.id, a.displayName]));
+  const attributeLabels = attributeLabelsFor(customAttributes, modId ?? "mymod");
 
   return (
     <div className="grid grid-cols-2 gap-x-3 gap-y-1 p-2 text-xs overflow-y-auto items-start">
@@ -111,6 +114,7 @@ export default function EffectPropertyPanel({ effect, customAttributes, onUpdate
           onChange={(v) => onUpdate({ soundOnAdded: v })}
           options={EFFECT_ADD_SOUND_OPTIONS}
           placeholder="(none)"
+          picker={false}
         />
       </Field>
 
@@ -120,6 +124,7 @@ export default function EffectPropertyPanel({ effect, customAttributes, onUpdate
           attributes={attributes}
           attributeOptions={attributeOptions}
           attributeLabels={attributeLabels}
+          onEditCustomAttribute={onEditCustomAttribute}
           onChange={setAttributes}
           addLabel="+ Add attribute modifier"
           aiContext={{ target: "effect", name: effect.displayName, category: effect.category, customAttributes }}

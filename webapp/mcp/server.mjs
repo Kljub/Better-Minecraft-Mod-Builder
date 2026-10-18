@@ -138,6 +138,7 @@ const server = new McpServer({ name: "mc-designer", version: "1.0.0" }, {
     "Entity models use Blockbench conventions: 1 unit = 1 pixel = 1/16 block, +Y up, absolute coordinates, the mob faces north (-Z); bones pivot at `pivot`, cubes span from..from+size.",
     "Workflow for a mob: create_model → add_bones/add_cubes (bulk) → pack_uv → paint_cubes → screenshot (check it!) → add animations (create_animation + add_keyframes, or generate_animation) → set_entity_settings.",
     "Always look at a screenshot after building or changing geometry, and fix what looks wrong. Call get_guide for detailed playbooks.",
+    "Held weapons/tools/staffs/shields: build them as their own bone, then ALWAYS call hold_item to put them in the hand (it computes hand + grip and parents the item to the arm) — never place them by hand.",
   ].join("\n"),
 });
 
@@ -210,6 +211,12 @@ forward("edit_element", "Change a bone or cube (by name or id; prefix bone:/cube
 });
 
 forward("move_bone", "Move a bone with all its child bones and cubes by an offset in pixels.", { model: z.string(), bone: z.string(), offset: vec3 });
+forward("hold_item", "Put a held item (weapon, tool, staff, shield…) into a hand: computes the hand from the arm's cube and the grip from the item's handle (its longest thin cube), turns the item in 90° steps so its head points `direction`, moves it so the hand closes around the grip, sets the item bone's pivot to the hand and parents it to the arm. ALWAYS use this for held items instead of placing them by hand.", {
+  model: z.string(), item: z.string().describe("the item's bone (all its cubes and child bones move with it)"),
+  hand: z.string().describe("the arm / forearm / hand bone that holds it"),
+  direction: z.enum(["keep", "forward", "up", "down"]).optional().describe("where the head/blade points with the arm hanging: forward (-Z) for swords/axes/maces, up for staffs/spears/halberds; default keep"),
+  grip: z.number().min(0).max(1).optional().describe("where along the handle the hand holds it, 0 = pommel end, 1 = head end; default 0.2 (short) / 0.35 (long)"),
+});
 
 forward("delete_elements", "Delete bones (with everything inside) and/or cubes by name or id (a bone wins over a same-named cube; prefix cube: to delete just the cube).", { model: z.string(), targets: z.array(z.string()).min(1) });
 
@@ -294,13 +301,25 @@ const GUIDES = {
 - Quadruped (cow-like): body bone pivot [0,19,2], body cube rotated 90° X; legs pivot at hip height.
 - Build symmetric parts once, then mirror_element. Use add_cubes in bulk.
 - After geometry: pack_uv, then paint_cubes, then screenshot from front + perspective and fix issues (gaps, floating parts, z-fighting = overlapping identical faces: offset by 0.01 or inflate).
-- Keep cube counts reasonable (Java entity models: dozens, not hundreds).`,
+- Keep cube counts reasonable (Java entity models: dozens, not hundreds).
+
+HELD ITEMS (weapons, tools, staffs, shields, torches…) — ALWAYS gripped in a hand, never floating or stuck to the body:
+- Give the item its OWN bone, parented to the arm (or forearm/hand bone) that holds it — so it follows every arm animation. Never parent it to body/root.
+- Build the item (own bone + cubes, anywhere), then ALWAYS call hold_item(model, item_bone, arm_bone, direction) — it computes the hand and grip and attaches it exactly. Don't place held items by hand.
+- (What hold_item does:) the item bone's pivot is the hand: the centre of the arm cube's lower end, ~1–2 px above the arm's bottom face. Humanoid right arm (the mob's right is +X): arm pivot [5,22,0], arm cube from [4,12,-2] size [4,12,4] → hand ≈ [6,13,0]; left arm mirrored → hand ≈ [-6,13,0].
+- The handle/grip cube passes THROUGH the hand: it overlaps the arm cube by at least 2 px and its centre line runs through the hand point. Handle 1–2 px thick.
+- Orientation like vanilla held items: with the arm hanging down, one-handed weapons (sword, axe, mace) point FORWARD (-Z) out of the fist — handle along Z, head/blade at the far end; long staffs/spears run vertically through the hand (top above the shoulder, bottom near the ground); a shield sits on the outside of the forearm facing -Z/sideways.
+- Two-handed items: parent to the main (right) arm and angle both arms so both hands touch the handle.
+- Check: screenshot front AND side (left/right). The hand must visibly close around the grip — any gap between hand and handle, or the item hanging next to/in front of the body, is a bug: move the item bone to the hand.`,
   texturing: `TEXTURING
 - pack_uv first (box UV, no overlaps). Then paint_cubes with a palette: default_color + colors per bone/cube name. noise 0.1–0.2 gives a Minecraft-like grain.
 - Details: paint_face on a cube face (pixels relative to the face, x→right, y→down as seen from outside), e.g. eyes on the head's north face.
 - paint_texture for arbitrary texture pixels. Texture size comes from pack_uv; don't change it afterwards without re-packing.`,
   animation: `ANIMATION
 - Values are offsets on the rest pose: rotation degrees (X = pitch forward/back, Y = yaw, Z = roll), position px, scale factor.
+- SIGN WARNING: in this editor rotation +X swings a hanging arm FORWARD. That is the OPPOSITE of vanilla Java code (zombie arms: xRot = -90°)
+  and of Bedrock/GeckoLib animation files — do NOT carry those signs over. Zombie arms straight forward here = [90, 0, 0]; an attack swing peaks at +X.
+- add_keyframes / generate_animation answer with "motion": where each limb's tip actually moves. Read it — if an attack arm says "backward", flip the sign.
 - Direction (the mob faces north, -Z): rotation +X swings a hanging arm/leg FORWARD (towards the face), -X swings it back; a head pitches DOWN with -X and up with +X; position -Z moves forward. Check the front view after keying an attack.
 - walk: legs swing ±30–45° on X in opposite phase, arms opposite to legs, ~1 s loop. idle: subtle breathing (body scale 1→1.02) or head sway, 2–4 s loop. attack: arms swing forward (+X, e.g. 90–110°) and the head dips (-X), body lunges to -Z, 0.3–0.6 s, loop "once".
 - generate_animation gives a starting point from bone names; refine with add_keyframes; check with screenshot(animation, time).

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "child_process";
-import { mkdtemp, rm } from "fs/promises";
+import { mkdtemp, rm, writeFile } from "fs/promises";
 import { createServer } from "net";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -23,12 +23,20 @@ const MCP_SERVER = join(process.cwd(), "mcp", "server.mjs");
 const TIMEOUT_MS = 15 * 60_000;
 let running: ChildProcess | null = null;
 
+const MAX_IMAGE_B64 = Math.ceil((5 * 1024 * 1024 * 4) / 3);
+const MAX_TOTAL_B64 = Math.ceil((24 * 1024 * 1024 * 4) / 3);
+const MAX_IMAGES = 16;
+
 const SYSTEM = [
   "You are building Minecraft mod content inside the MC Screen Designer web editor, which is open in the user's browser.",
   "Work ONLY through the mc-designer MCP tools. Call get_guide first and follow its conventions.",
   "For a creature/mob request: create a new entity model element (create_model with a fitting template), shape it from bones and cubes,",
   "pack the UVs, paint a texture that matches the description, add idle/walk/attack animations as appropriate, set its entity settings",
   "(health, speed, damage, hostile or not, spawning), then take a screenshot to check your work and fix what looks wrong.",
+  "Animation sign: in this editor rotation +X swings a hanging arm FORWARD (opposite of vanilla Java's xRot and of Bedrock files) —",
+  "attacks and raised arms use POSITIVE X. Read the \"motion\" field add_keyframes returns and fix any limb that moves the wrong way.",
+  "Held items (weapons, tools, staffs, shields): build the item as its own bone, then ALWAYS call hold_item(model, item, hand, direction) —",
+  "it puts the grip exactly into the hand and parents the item to the arm. Never position held items yourself; check the result in a side screenshot.",
   "Every tool call is one undo step for the user. Finish with a short summary of what you built, in the user's language.",
 ].join(" ");
 
@@ -51,7 +59,7 @@ const short = (v: unknown, n = 120) => {
 export async function POST(request: Request) {
   const refused = guardRequest(request);
   if (refused) return refused;
-  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown };
+  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown; image?: unknown; images?: unknown };
   try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
   const provider = body.provider;
   if (provider !== "claude" && provider !== "codex") {
@@ -63,10 +71,47 @@ export async function POST(request: Request) {
   if (!prompt) return Response.json({ error: "Empty prompt" }, { status: 400 });
   if (running) return Response.json({ error: "A generator run is already in progress." }, { status: 409 });
 
-  const ctx = (body.context ?? {}) as { activeElement?: { kind?: string; id?: string } | null };
-  const active = ctx.activeElement?.kind && ctx.activeElement.id
-    ? `\n(Currently open in the editor: ${ctx.activeElement.kind} "${ctx.activeElement.id}" — edit it only if the request refers to it.)`
+  // Optional reference images (drawings, photos, concept art, renders of an uploaded mesh), each
+  // labelled with the view it shows (front, side, back…). `image` is the older single-image form.
+  const rawImages: unknown[] = Array.isArray(body.images) ? body.images : body.image != null ? [{ data: body.image, view: "" }] : [];
+  if (rawImages.length > MAX_IMAGES) return Response.json({ error: `At most ${MAX_IMAGES} reference images` }, { status: 400 });
+  const images: { mediaType: string; data: string; ext: string; view: string }[] = [];
+  for (const raw of rawImages) {
+    const r = (raw ?? {}) as { data?: unknown; view?: unknown };
+    const m = typeof r.data === "string" ? /^data:(image\/(png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(r.data) : null;
+    if (!m) return Response.json({ error: "Reference images must be PNG, JPEG, WebP or GIF" }, { status: 400 });
+    if (m[3].length > MAX_IMAGE_B64) return Response.json({ error: "A reference image is too large (max 5 MB)" }, { status: 400 });
+    const view = typeof r.view === "string" ? r.view.replace(/[^\w ()/+.,-]/g, "").trim().slice(0, 80) : "";
+    images.push({ mediaType: m[1], data: m[3], ext: m[2] === "jpeg" ? "jpg" : m[2], view });
+  }
+  if (images.reduce((n, i) => n + i.data.length, 0) > MAX_TOTAL_B64) return Response.json({ error: "Reference images are too large together (max 24 MB)" }, { status: 400 });
+  const imageLabel = (i: number) => `Image ${i + 1}${images[i].view ? ` — ${images[i].view}` : ""}`;
+  const imageList = images.length === 1 && !images[0].view
+    ? "A reference image is attached."
+    : `${images.length} reference images are attached, in this order:\n${images.map((_, i) => `- ${imageLabel(i)}`).join("\n")}\n` +
+      "They show the same subject from different views (front = what faces north/-Z in the editor; in a front view the subject's right side is on the image's left).";
+  // The images are the main spec when given — make the agent study them first and check against them.
+  const imageNote = images.length === 0 ? "" : `\n\n${imageList}\n` + [
+    "The reference is the main specification — the result must clearly look like it. Before calling any build tool:",
+    "1. Study the image(s) and write a short inventory: every distinct part (head, horns, wings, each leg, tail, weapon, armour pieces…),",
+    "   its rough size relative to the body (e.g. wings ≈ 1.5× body height), where it attaches, and the main colours with hex values.",
+    "2. Turn that into a bone/cube plan in pixels (the overall height from the request or a sensible mob size) and build it.",
+    "3. Then take screenshots from the same view(s) as the reference images and compare side by side: silhouette, proportions,",
+    "   part count and colours. Fix every clear difference and compare again (at least one correction round).",
+    "Translate the look into Minecraft's blocky cube style, but keep every recognisable feature.",
+  ].join("\n");
+
+  const ctx = (body.context ?? {}) as { activeElement?: { kind?: string; id?: string } | null; referenceModel?: { name?: unknown; summary?: unknown; kind?: unknown } };
+  const reference = ctx.referenceModel && typeof ctx.referenceModel.summary === "string" && ctx.referenceModel.kind === "mesh"
+    ? `\n\nReference 3D mesh "${String(ctx.referenceModel.name ?? "reference").slice(0, 80)}" (an STL/OBJ/GLB/3MF file the user uploaded), converted into a voxel approximation in the mc-designer coordinates — boxes with from/size in pixels, scaled so the longest side is 32 px, standing on Y=0 and facing north (-Z):\n${ctx.referenceModel.summary.slice(0, 60_000)}\n` +
+      "Rebuild its shape as a clean Minecraft-style entity model: group it into sensible bones (body, head, legs, arms, tail…) with pivots at the joints, and merge the voxel boxes into far fewer, larger cubes — the voxels are a measurement, not cubes to copy one by one. Rescale if the request asks for a different size. Renders of the mesh are among the attached images."
+    : ctx.referenceModel && typeof ctx.referenceModel.summary === "string"
+    ? `\n\nReference model "${String(ctx.referenceModel.name ?? "reference").slice(0, 80)}" (an existing .bbmodel / GeckoLib model, in the same coordinates as the mc-designer tools — pivots and cube from/size in pixels):\n${ctx.referenceModel.summary.slice(0, 60_000)}\n` +
+      "Use it as orientation or starting point: keep its proportions and bone layout where the request doesn't say otherwise; you may rebuild it closely with add_bones/add_cubes and then adapt it."
     : "";
+  const active = (ctx.activeElement?.kind && ctx.activeElement.id
+    ? `\n(Currently open in the editor: ${ctx.activeElement.kind} "${ctx.activeElement.id}" — edit it only if the request refers to it.)`
+    : "") + reference;
   const port = await freePort();
   const dir = await mkdtemp(join(tmpdir(), "mc-ui-agent-"));
   const mcpEnv = { MC_DESIGNER_MCP_PORT: String(port) };
@@ -83,7 +128,18 @@ export async function POST(request: Request) {
       "--append-system-prompt", SYSTEM,
     ];
     if (model) args.push("--model", model);
-    stdin = prompt + active;
+    stdin = prompt + active + imageNote;
+    if (images.length) {
+      // Images go in as user message content blocks (stream-json input), each after its label.
+      args.push("--input-format", "stream-json");
+      stdin = JSON.stringify({ type: "user", message: { role: "user", content: [
+        ...images.flatMap((img, i) => [
+          ...(images.length > 1 || img.view ? [{ type: "text", text: `${imageLabel(i)}:` }] : []),
+          { type: "image", source: { type: "base64", media_type: img.mediaType, data: img.data } },
+        ]),
+        { type: "text", text: stdin },
+      ] } }) + "\n";
+    }
   } else {
     args = [
       // --ignore-user-config: same isolation for codex (its login still comes from CODEX_HOME).
@@ -97,8 +153,13 @@ export async function POST(request: Request) {
       "-c", 'approval_policy="never"',
     ];
     if (model) args.push("-m", model);
+    for (const [i, img] of images.entries()) {
+      const file = join(dir, `reference-${i + 1}.${img.ext}`);
+      await writeFile(file, Buffer.from(img.data, "base64"));
+      args.push("-i", file);
+    }
     args.push("-");
-    stdin = `${SYSTEM}\n\n---\n\n${prompt}${active}`;
+    stdin = `${SYSTEM}\n\n---\n\n${prompt}${active}${imageNote}`;
   }
 
   // Linked accounts (Settings → AI): queue order, free quota first; empty = the host's own login.

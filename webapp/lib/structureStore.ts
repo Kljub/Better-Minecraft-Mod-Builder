@@ -4,6 +4,7 @@
  * localStorage. The element spec only stores the key. Per browser, like custom textures.
  */
 import { cloudDeleteFile, cloudPutFile } from "@/lib/cloud/sync";
+import { genId } from "@/lib/utils";
 
 const DB_NAME = "mc-ui-builder-structures";
 const STORE = "structures";
@@ -29,7 +30,7 @@ function run<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequ
 
 /** Stores the file and returns its key ("<random>/<file name>"). */
 export async function saveStructureFile(file: Blob, name: string): Promise<string> {
-  const key = `${crypto.randomUUID().slice(0, 8)}/${name.replace(/[^\w.-]/g, "_")}`;
+  const key = `${genId().replace(/-/g, "").slice(-8)}/${name.replace(/[^\w.-]/g, "_")}`;
   await run("readwrite", (s) => s.put(file, key));
   cloudPutFile("structure", key, file);
   return key;

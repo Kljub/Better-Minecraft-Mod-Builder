@@ -41,12 +41,20 @@ export type FieldDef =
   /** pack texture key ("custom/foo.png") picked from the texture library */
   | (FieldBase & { type: "texture" })
   /** free registry id with suggestions (e.g. "minecraft:stone") */
-  | (FieldBase & { type: "registry"; suggestions: (ctx: FieldContext) => string[]; placeholder?: string })
+  | (FieldBase & {
+      type: "registry"; suggestions: (ctx: FieldContext) => string[]; placeholder?: string;
+      /** an item/block id: adds the creative-inventory picker (blocks only for "block") */
+      itemKind?: "item" | "block";
+    })
   | (FieldBase & { type: "multiselect"; options: SelectOption[] })
   /** repeatable group of sub-fields (stored as an array of objects) */
   | (FieldBase & { type: "list"; itemLabel: string; fields: FieldDef[]; newItem: () => Record<string, unknown> })
   /** a structure template (.nbt) stored in lib/structureStore; the value is its store key */
-  | (FieldBase & { type: "structure" });
+  | (FieldBase & { type: "structure" })
+  /** an uploaded sound, converted to Ogg Vorbis by /api/sounds/convert (value: SoundValue) */
+  | (FieldBase & { type: "sound" })
+  /** a 3D mesh + its rig/animations for the Mesh Models element (value: MeshModelValue) */
+  | (FieldBase & { type: "meshModel" });
 
 export interface FieldContext {
   modId: string;
@@ -54,6 +62,8 @@ export interface FieldContext {
   /** ids of the project's own items/blocks, already namespaced ("mymod:ruby") */
   projectItems: string[];
   projectBlocks: string[];
+  /** texture keys of the loaded vanilla pack ("block/stone.png", …), for override pickers */
+  packTextureKeys?: string[];
   /** ids of the project's screens (as exported to assets/<modId>/screenspec/<id>.json) */
   projectScreens?: string[];
   /** namespaced ids of the project's generic elements, by kind */
@@ -88,6 +98,9 @@ export interface SharedOutputs {
    * at mod construction (GsonSpecIO.fromClasspath) — for content that needs real Java
    * registration (commands, fluids, game rules, …), not just data files. */
   manifest?: Record<string, unknown>;
+  /** JSON object file (e.g. "assets/<modid>/sounds.json") -> keys this element adds. All elements'
+   * keys for one path are merged into one object (sounds.json can exist only once per namespace). */
+  jsonMerge?: Record<string, Record<string, unknown>>;
   /** atlas id (e.g. "minecraft:armor_trims") -> sprite sources this element adds. All sources for
    * one atlas are merged into assets/<ns>/atlases/<path>.json — atlas files from every pack are
    * combined by the game, but two elements writing the same file would overwrite each other. */
@@ -114,6 +127,9 @@ export interface ElementKindDef {
   fields: FieldDef[];
   /** field shown as the tile label instead of the id (e.g. "name") */
   labelField?: string;
+  /** the id follows the labelField while typing ("Keep Inventory Plus" -> "keep_inventory_plus"),
+   * until the id is renamed by hand — see withLabelId */
+  idFromLabel?: boolean;
   /** texture key shown on the tile */
   thumb?: (spec: ElementSpec) => string | undefined;
   /** problems that would make the export fail or do nothing in game */
@@ -127,6 +143,11 @@ export interface ElementKindDef {
   textures?: (spec: ElementSpec) => string[];
   /** structure-store keys (lib/structureStore) the export must load before calling `files` */
   binaryFiles?: (spec: ElementSpec) => string[];
+  /** not part of the mod: `files` are skipped by the mod export (writeElementFiles) and only used
+   * by `download` — e.g. a resource pack, which is its own zip for the resourcepacks folder */
+  standalone?: boolean;
+  /** an extra "download" button in the element's editor that zips `files` on their own */
+  download?: { label: string; fileName: (spec: ElementSpec) => string };
 }
 
 export type ElementsByKind = Record<string, ElementSpec[]>;

@@ -1,0 +1,66 @@
+/**
+ * MCreator's texture-maker layer templates ("From template" in its image editor) — the names of the
+ * 419 16×16 greyscale/overlay PNGs in MCreator's repository. The images themselves are NOT shipped with
+ * this app (MCreator is GPL-3.0): the browser loads them straight from GitHub at a pinned commit,
+ * the same way the Faithful reference pack is fetched (lib/extractFromGithub.ts).
+ */
+export const MCREATOR_COMMIT = "d8ba70ec8b617e00d4362bce8f901e640e260310";
+const BASE = `https://raw.githubusercontent.com/MCreator/MCreator/${MCREATOR_COMMIT}/plugins/mcreator-core/templates/textures/texturemaker/`;
+
+export const TEMPLATE_NAMES: readonly string[] = [
+  "apple_base", "apple_stem", "apple_stem_monochrome", "arrow_feather", "arrow_stick", "arrow_tip", "arrow_tipped", "ball1",
+  "ball2", "ball3", "ball4", "ball5", "bedrock", "block_base", "boat_base", "boat_entity",
+  "boat_entity_chest_overlay", "boat_item", "boat_item_chest_overlay", "boat_paddles", "body", "bolomid", "boots", "bowl",
+  "bowl_monochrome", "bowl_soup", "bowl_soup_heterogene", "brick", "bucket", "bucket_liquid_0", "bucket_liquid_1", "bucket_liquid_water",
+  "bullet", "bulletdot", "bulletlong", "bulletsimple", "coal", "coal_block", "coal_charcoal", "cobalt overlay",
+  "Cross", "cross2", "CustomBrick", "dead_bush", "diamond_block", "dirt", "dirt (2)", "dirt1",
+  "dirt_monochrome", "Distortion", "door_bottom_1", "door_bottom_2", "door_hinges_bottom", "door_hinges_top", "door_item_1", "door_item_2",
+  "door_top_1", "door_top_2", "dust_base", "dust_sprinkles", "dye0", "dye1", "dye2", "dye3",
+  "dye4", "dye5", "dye6", "dye7_bottom", "dye7_full", "dye7_top", "egg_accent", "egg_base",
+  "emerald_block", "Empty_square_big_bottle", "Empty_square_bottle", "Empty_square_bottle_liquid", "feather", "fern", "finder", "fire_charge",
+  "fire_charge_dots", "Fireium", "firework_charge_base", "firework_charge_sprinkles", "flower2", "flower3", "flower4", "flower_bottom_head_sides",
+  "flower_bottom_stem", "flower_cluster_head_sparkles", "flower_cluster_stem", "flower_new_1_base", "flower_new_1_base_mono", "flower_new_1_blossom", "flower_new_2_base", "flower_new_2_base_mono",
+  "flower_new_2_blossom_part1", "flower_new_2_blossom_part2", "flower_new_3_base", "flower_new_3_base_mono", "flower_new_3_blossom", "flower_new_4_base", "flower_new_4_base_mono", "flower_new_4_blossom",
+  "flower_new_base", "flower_new_base_mono", "flower_new_blossom", "flower_small_head_frilly", "flower_small_head_petalley", "flower_small_stem", "flower_tall_head_round", "flower_tall_head_sides",
+  "flower_tall_stem", "flowerhead2", "flowerhead3", "Frame", "frame2", "frame3", "frame4", "frame5",
+  "frame6", "frame7", "frame8", "framed_cobble", "gem", "Gem template1", "Gem template2", "gem10",
+  "gem11", "gem12", "gem13", "gem2", "gem3", "gem4", "gem5", "gem6",
+  "gem7", "gem8", "gem9", "gernid", "ghastTear", "glass", "gold overlay", "gold_block",
+  "gradient1", "grass", "grass1", "grass_2", "grass_block_side_overlay", "grass_block_top", "grass_double_bottom", "grass_side",
+  "grass_side_monochrome", "grass_top", "grass_top_monochrome", "grasstop1", "grasstop2", "grasstop3", "gravel", "grid",
+  "hanging_sign_entity_base", "hanging_sign_entity_overlay", "hanging_sign_gui_base", "hanging_sign_gui_overlay", "hanging_sign_item_base", "hanging_sign_item_overlay", "haybale_side", "haybale_side_base",
+  "haybale_side_red_rope", "haybale_side_rope", "haybale_top", "helmet", "horsearmor_full", "horsearmor_layer_0", "horsearmor_layer_2", "horsearmor_layer_3",
+  "ice", "ingot_bright", "ingot_dark", "iron_bars", "iron_block", "iron_case", "Iron_case2", "lapis_block",
+  "laterite overlay", "leaves2", "leaves_0", "leaves_1", "leaves_2", "leaves_3", "leaves_4", "leaves_5",
+  "leaves_new1", "leaves_new2", "leggings", "light_pearl", "log_side", "log_side_0", "log_side_1", "log_side_2",
+  "log_side_3", "log_side_4", "log_side_5", "log_top", "log_top_0", "log_top_1", "log_top_1_birch", "log_top_bark",
+  "log_top_inside", "machine_front_0", "machine_front_1", "machine_front_hole_0", "machine_front_hole_1", "machine_side", "machine_side_alt", "machine_top",
+  "machine_top_pattern", "machine_top_with_pattern", "machinebottom", "machinebottom2", "machinebottom3", "machineside1", "machineside2", "machineside3",
+  "Malachite overlay", "melon_side", "melon_top", "mob_spawner", "modrid", "mushroom_block", "mushroom_brown", "mushroom_red_body",
+  "mushroom_red_dots", "mushroom_red_stem", "new_cobblestone1", "noise1", "noise10", "noise11", "noise12", "noise13",
+  "noise14", "noise15", "noise16", "noise17", "noise2", "noise3", "noise4", "noise5",
+  "noise6", "noise7", "noise8", "noise9", "nugget", "nugget1", "ore1", "ore10",
+  "ore11", "ore12", "ore2", "ore3", "ore4", "ore5", "ore6", "ore7",
+  "ore8", "ore9", "oreblock1", "oreblock2", "oreblock3", "oreblock4", "oreblock5", "oreblock6",
+  "oreblock7", "oreblock8", "oregem1", "oregem2", "oregem3", "overlay1", "overlay2", "overlay3",
+  "overlay4", "pattern1", "pattern10", "pattern11", "pattern12", "pattern13", "pattern14", "pattern15",
+  "pattern16", "pattern2", "pattern3", "pattern4", "pattern5", "pattern6", "pattern7", "pattern8",
+  "pattern9", "pearl", "Pill", "pixel_case", "planks", "planks_0", "planks_1", "plant1",
+  "plant1top", "plant2", "plant2top", "plant3", "plant3top", "plant4", "plant4top", "potion_bottle_overlay",
+  "potion_bottle_overlay_lingering", "potion_bottle_overlay_splash", "potion_fluid_bright", "potion_fluid_dark", "potion_fluid_water", "powder1", "powder2", "prismarine_dark",
+  "pumpkin_front", "pumpkin_front_torch", "pumpkin_side", "pumpkin_top", "pumpkin_top_stem", "quartz_block_chiseled", "quartz_block_chiseled_lines", "quartz_block_chiseled_top",
+  "quartz_block_chiseled_top_lines", "quartz_block_lines", "quartz_block_lines_lines", "quartz_block_lines_top", "quartz_block_lines_top_lines", "quartz_block_top", "quartzblock_lines1", "quartzblock_lines2",
+  "record", "record_broken", "record_mid_0", "record_mid_1", "record_mid_2_bottom", "record_mid_2_top", "record_mid_dots_bright", "record_mid_dots_dark",
+  "record_mid_inner", "redstone_block", "redstone_lamp_base", "redstone_lamp_base_monochrome", "redstone_lamp_lit", "redstone_lamp_lit_mono", "redstone_lamp_unlit", "redstone_lamp_unlit_mono",
+  "reeds", "reeds_item", "reeds_plain", "rgbnoise", "robid", "sapphire overlay", "Scratch", "sea_lantern",
+  "shears_base", "shears_base_mono", "shears_blades", "shears_mechanism", "side_panel", "sign_entity", "sign_item", "SkeletBlock",
+  "SkeletBlockTop", "slab", "stick", "stick_monochrome", "stone", "stone_bricks", "stone_bricks_cracks", "stone_bricks_moss",
+  "stone_slab_side", "stone_slab_top", "stonebrick", "stonebrick_carved", "stonebrick_cracked", "stripped_log_side", "stripped_log_top_outside", "tnt_bottom",
+  "tnt_bottom_mono", "tnt_side_base", "tnt_side_base_mono", "tnt_side_overlay", "tnt_side_text", "tnt_top", "tnt_top_fuse", "tnt_top_mono",
+  "tool_axe", "tool_base_stick", "tool_hoe", "tool_pickaxe", "tool_shovel_base", "tool_shovel_grip", "tool_shovel_top", "tool_sickle_base",
+  "tool_sickle_blade", "tool_sword", "tool_sword_blade", "tool_sword_handle", "torch_base", "torch_tip", "torch_tip_mono", "torch_tip_redstone_mid",
+  "torch_tip_redstone_shell", "trapdoor_1", "trapdoor_2", "TriangleBottle", "TriangleBottleLiquid", "vine", "vine2", "vine3",
+  "WitherOrnament", "wool1", "wool2",
+];
+
+export const templateUrl = (name: string) => BASE + encodeURIComponent(name) + ".png";

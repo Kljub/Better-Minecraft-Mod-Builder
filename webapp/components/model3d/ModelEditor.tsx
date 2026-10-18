@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box, Bone, Copy, Trash2, Move3d, Rotate3d, Scaling, Upload, Download, Camera, ChevronDown, ChevronRight, FileCode2,
   PenTool, Clapperboard, SlidersHorizontal, KeyRound, Palette,
+  Boxes,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,9 @@ import { ENTITY_SETTINGS_FIELDS } from "@/lib/elements/entitySettings";
 import type { FieldContext } from "@/lib/elements/types";
 import type { McVersion } from "@/lib/mcVersion";
 import { registerModelEditor } from "@/lib/ai/modelEditorRegistry";
+import VanillaMobDialog from "./VanillaMobDialog";
+import AnimationAiBar from "./AnimationAiBar";
+import { loadVanillaMob, vanillaLabel, type VanillaMob } from "@/lib/model3d/vanillaImport";
 
 const pascal = (s: string) => s.replace(/(^|[_\-\s.]+)([a-z0-9])/gi, (_, __, c: string) => c.toUpperCase()).replace(/[^A-Za-z0-9]/g, "") || "Model";
 
@@ -127,6 +131,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
 }) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [tab, setTab] = useState<Tab>("design");
+  const [vanillaOpen, setVanillaOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [mode, setMode] = useState<GizmoMode>("translate");
   const [snap, setSnap] = useState(1);
@@ -343,6 +348,25 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
   }, [model, collapsed, tab]);
 
   // ── import / export ──
+  /** Replaces the model with an imported one (one undo step); its texture becomes a custom texture. */
+  const applyImported = async (result: ReturnType<typeof fromBedrockGeo>, textureBlob: Blob | null, textureName: string, label?: string) => {
+    const hasContent = model.cubes.length > 0 && !(model.cubes.length === 1 && model.bones.length === 1);
+    if (hasContent && !window.confirm("Replace the current model with the imported one?")) return false;
+    const texture = textureBlob ? await uploadCustomTexture(new File([textureBlob], textureName, { type: textureBlob.type || "image/png" })) : "";
+    commit({ ...result.model, texture: texture || model.texture, animations: result.model.animations ?? [] });
+    setSelection(null);
+    setAnimId(null);
+    viewport.current?.setView("perspective");
+    toast.success(`Imported ${label ? `${label}: ` : ""}${result.model.cubes.length} cubes in ${result.model.bones.length} bones${result.model.animations?.length ? ` and ${result.model.animations.length} animations` : ""}.`);
+    for (const w of result.warnings) toast.warning(w);
+    return true;
+  };
+
+  const importVanilla = async (mob: VanillaMob) => {
+    const { geometry, texture } = await loadVanillaMob(mob);
+    return applyImported(fromBedrockGeo(geometry), texture, `${mob.id}.png`, vanillaLabel(mob.id));
+  };
+
   const handleImport = async (file: File) => {
     try {
       const json = JSON.parse(await file.text());
@@ -357,19 +381,8 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
         return;
       }
       const result = json && typeof json === "object" && "meta" in json ? fromBbmodel(json) : fromBedrockGeo(json);
-      let texture = "";
-      if (result.textureDataUrl) {
-        const blob = await (await fetch(result.textureDataUrl)).blob();
-        texture = await uploadCustomTexture(new File([blob], result.textureName || `${id}.png`, { type: blob.type || "image/png" }));
-      }
-      const hasContent = model.cubes.length > 0 && !(model.cubes.length === 1 && model.bones.length === 1);
-      if (hasContent && !window.confirm("Replace the current model with the imported one?")) return;
-      commit({ ...result.model, texture: texture || model.texture, animations: result.model.animations ?? [] });
-      setSelection(null);
-      setAnimId(null);
-      viewport.current?.setView("perspective");
-      toast.success(`Imported ${result.model.cubes.length} cubes in ${result.model.bones.length} bones${result.model.animations?.length ? ` and ${result.model.animations.length} animations` : ""}.`);
-      for (const w of result.warnings) toast.warning(w);
+      const blob = result.textureDataUrl ? await (await fetch(result.textureDataUrl)).blob() : null;
+      await applyImported(result, blob, result.textureName || `${id}.png`);
     } catch (err) {
       toast.error(`Could not import: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -447,6 +460,11 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
           <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => importRef.current?.click()} title="Import .bbmodel, Bedrock/GeckoLib .geo.json or .animation.json">
             <Upload className="h-3.5 w-3.5" /> Import
           </Button>
+          {variant === "entity" && (
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setVanillaOpen(true)} title="Start from a vanilla Minecraft mob (zombie, iron golem, …)">
+              <Boxes className="h-3.5 w-3.5" /> From Minecraft
+            </Button>
+          )}
           <input ref={importRef} type="file" accept=".bbmodel,.json" className="hidden" data-testid="model-import-input"
             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleImport(f); }} />
           <DropdownMenu>
@@ -557,6 +575,15 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
                 reference={variant === "armor" ? "player" : undefined}
               />
             </div>
+            {tab === "animation" && (
+              <AnimationAiBar model={model} anim={anim} onApply={(next, isNew) => {
+                setAnimations(isNew ? [...animations, next] : animations.map((a) => (a.id === next.id ? next : a)));
+                setAnimId(next.id);
+                setSelectedKf(null);
+                setTime(0);
+                toast.success(isNew ? `Created "${next.name}" — Ctrl+Z undoes it.` : `Rewrote "${next.name}" — Ctrl+Z undoes it.`);
+              }} />
+            )}
             {tab === "animation" && (
               <AnimationTimeline
                 model={model}
@@ -754,6 +781,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
       )}
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      <VanillaMobDialog open={vanillaOpen} onOpenChange={setVanillaOpen} onPick={importVanilla} />
     </div>
   );
 }

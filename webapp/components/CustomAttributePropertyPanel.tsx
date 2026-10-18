@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Field, NumInput, Toggle, PropSelect } from "@/components/SchemaFields";
 
 interface Props {
+  /** shown before the id: custom attributes live in the mod's namespace */
+  modId?: string;
   attribute: CustomAttributeSpec | null;
   onUpdate: (patch: Partial<CustomAttributeSpec>) => void;
   /** Renames the attribute's id itself (not just displayName) — rewrites any item/effect that
@@ -18,7 +20,7 @@ interface Props {
  * ItemBlockPropertyPanel. The ID is editable (suggested as "{project}_{displayname}" when created)
  * since items/effects reference it by id — renaming it here rewrites those references too.
  */
-export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRenameId }: Props) {
+export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRenameId, modId }: Props) {
   const [idInput, setIdInput] = useState(attribute?.id ?? "");
   useEffect(() => { setIdInput(attribute?.id ?? ""); }, [attribute?.id]);
 
@@ -41,13 +43,16 @@ export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRe
       <div className="col-span-2 font-bold text-foreground mb-1 uppercase tracking-wide">Custom Attribute</div>
 
       <Field label="ID">
-        <Input
-          className="h-6 text-xs px-1.5 font-mono"
-          value={idInput}
-          onChange={(e) => setIdInput(e.target.value)}
-          onBlur={commitId}
-          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-        />
+        <div className="flex items-center gap-0.5">
+          {modId && <span className="shrink-0 font-mono text-muted-foreground" title="Namespace (your mod id)">{modId}:</span>}
+          <Input
+            className="h-6 text-xs px-1.5 font-mono"
+            value={idInput}
+            onChange={(e) => setIdInput(e.target.value)}
+            onBlur={commitId}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          />
+        </div>
       </Field>
 
       <Field label="Display Name">

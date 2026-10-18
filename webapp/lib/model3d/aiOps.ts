@@ -117,6 +117,132 @@ export function moveBone(model: EntityModel, bone: string, offset: Vec3): Entity
   return translateBone(model, need(findBone(model, bone), `bone "${bone}"`).id, offset);
 }
 
+/**
+ * Puts a held item (weapon, tool, staff, shield…) into a hand: finds the item's handle (its
+ * longest thin cube) and the hand (the far end of the arm bone's main cube from its pivot), turns
+ * the item in 90° steps so its head points `direction`, moves it so the grip point sits in the hand,
+ * makes the hand the item bone's pivot and parents the item to the arm — so arm animations swing it.
+ * `grip` is how far up the handle the hand holds it (0 = pommel end, 1 = head end).
+ */
+export function holdItem(model: EntityModel, itemRef: string, handRef: string, opts: { direction?: "keep" | "forward" | "up" | "down"; grip?: number } = {}): { model: EntityModel; hand: Vec3; grip: Vec3 } {
+  const item = need(findBone(model, itemRef), `item bone "${itemRef}"`);
+  const arm = need(findBone(model, handRef), `hand/arm bone "${handRef}"`);
+  const subtree = new Set(boneSubtree(model, item.id));
+  if (subtree.has(arm.id)) throw new Error(`"${arm.name}" is part of the item — pick the arm that holds it`);
+  const itemCubes = model.cubes.filter((c) => c.bone && subtree.has(c.bone));
+  if (!itemCubes.length) throw new Error(`item bone "${item.name}" has no cubes`);
+  const armCubes = model.cubes.filter((c) => c.bone === arm.id);
+  if (!armCubes.length) throw new Error(`arm bone "${arm.name}" has no cubes of its own`);
+
+  const lo = (c: ModelCube): Vec3 => [0, 1, 2].map((i) => Math.min(c.from[i], c.to[i])) as Vec3;
+  const hi = (c: ModelCube): Vec3 => [0, 1, 2].map((i) => Math.max(c.from[i], c.to[i])) as Vec3;
+  const dims = (c: ModelCube) => [0, 1, 2].map((i) => hi(c)[i] - lo(c)[i]);
+  const axisOf = (c: ModelCube) => { const d = dims(c); return d.indexOf(Math.max(...d)); };
+  const center = (c: ModelCube): Vec3 => [0, 1, 2].map((i) => (lo(c)[i] + hi(c)[i]) / 2) as Vec3;
+
+  // Hand: far end of the arm's biggest cube along its long axis, a little inside the cube.
+  const main = [...armCubes].sort((a, b) => dims(b).reduce((x, y) => x * y, 1) - dims(a).reduce((x, y) => x * y, 1))[0];
+  const ax = axisOf(main);
+  const hand = center(main);
+  const far = Math.abs(lo(main)[ax] - arm.origin[ax]) > Math.abs(hi(main)[ax] - arm.origin[ax]) ? lo(main)[ax] : hi(main)[ax];
+  const inset = Math.min(1.5, dims(main)[ax] / 4);
+  hand[ax] = far + (far < center(main)[ax] ? inset : -inset);
+
+  // Handle: the cube that's longest relative to its thickness.
+  const handle = [...itemCubes].sort((a, b) => {
+    const r = (c: ModelCube) => { const d = [...dims(c)].sort((x, y) => y - x); return d[0] / Math.max(0.5, d[1]); };
+    return r(b) - r(a) || Math.max(...dims(b)) - Math.max(...dims(a));
+  })[0];
+  const hax = axisOf(handle);
+  // Pommel = the handle end farther from the rest of the item (blade / axe head / staff top).
+  const rest = itemCubes.filter((c) => c !== handle);
+  const restCenter = rest.length ? rest.map(center).reduce((s, c) => s + c[hax], 0) / rest.length : hi(handle)[hax];
+  const pommelLow = Math.abs(lo(handle)[hax] - restCenter) >= Math.abs(hi(handle)[hax] - restCenter);
+  const len = dims(handle)[hax];
+  const g = Math.max(0, Math.min(1, opts.grip ?? (len > 16 ? 0.35 : 0.2)));
+  let grip = center(handle);
+  grip[hax] = pommelLow ? lo(handle)[hax] + len * g : hi(handle)[hax] - len * g;
+
+  // Turn in 90° steps so the head (pommel → head) points the requested way.
+  let m = model;
+  const want: Record<string, Vec3> = { forward: [0, 0, -1], up: [0, 1, 0], down: [0, -1, 0] };
+  const dir = opts.direction && opts.direction !== "keep" ? want[opts.direction] : null;
+  if (dir) {
+    const cur: Vec3 = [0, 0, 0];
+    cur[hax] = pommelLow ? 1 : -1;
+    const rot = rotationBetween(cur, dir);
+    if (rot) {
+      const p = (v: Vec3): Vec3 => { const d = [v[0] - grip[0], v[1] - grip[1], v[2] - grip[2]]; return [0, 1, 2].map((i) => grip[i] + rot[i][0] * d[0] + rot[i][1] * d[1] + rot[i][2] * d[2]) as Vec3; };
+      m = {
+        ...m,
+        bones: m.bones.map((b) => (subtree.has(b.id) ? { ...b, origin: p(b.origin) } : b)),
+        cubes: m.cubes.map((c) => {
+          if (!c.bone || !subtree.has(c.bone)) return c;
+          const a = p(c.from), b = p(c.to);
+          return { ...c, from: [0, 1, 2].map((i) => Math.min(a[i], b[i])) as Vec3, to: [0, 1, 2].map((i) => Math.max(a[i], b[i])) as Vec3, origin: p(c.origin) };
+        }),
+      };
+    }
+  }
+  const offset: Vec3 = [hand[0] - grip[0], hand[1] - grip[1], hand[2] - grip[2]];
+  m = translateBone(m, item.id, offset);
+  m = updateBone(m, item.id, { origin: hand, parent: arm.id });
+  grip = hand;
+  return { model: m, hand, grip };
+}
+
+/** 90°/180° rotation matrix turning axis unit vector a into b (null if equal). */
+function rotationBetween(a: Vec3, b: Vec3): number[][] | null {
+  if (a.every((v, i) => v === b[i])) return null;
+  const I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  const opposite = a.every((v, i) => v === -b[i]);
+  // Rotation axis: a × b, or any axis perpendicular to a for a half turn.
+  const k: Vec3 = opposite ? (a[0] === 0 ? [1, 0, 0] : [0, 1, 0]) : [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const K = [[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]];
+  const K2 = K.map((r) => [0, 1, 2].map((j) => r[0] * K[0][j] + r[1] * K[1][j] + r[2] * K[2][j]));
+  // Rodrigues: R = I + sinθ K + (1 − cosθ) K²; θ = 90° → I + K + K², θ = 180° → I + 2K².
+  return I.map((r, i) => r.map((v, j) => v + (opposite ? 0 : K[i][j]) + (opposite ? 2 : 1) * K2[i][j]));
+}
+
+/**
+ * Plain-words check of an animation's rotations for the AI: for every rotated bone, where the tip
+ * of its own geometry (the cube corner farthest from the pivot) moves at the biggest keyframe —
+ * so a sign mistake ("arms swing backwards") is visible in the tool result, not only on screen.
+ */
+export function describeMotion(model: EntityModel, anim: ModelAnimation): string[] {
+  const out: string[] = [];
+  const rad = Math.PI / 180;
+  const rotate = (v: Vec3, r: Vec3): Vec3 => {
+    // Euler ZYX (= Rz · Ry · Rx applied to v), the same as the viewport and Minecraft.
+    const [x, y, z] = v, [a, b, c] = r.map((d) => d * rad);
+    const y1 = y * Math.cos(a) - z * Math.sin(a), z1 = y * Math.sin(a) + z * Math.cos(a);
+    const x2 = x * Math.cos(b) + z1 * Math.sin(b), z2 = -x * Math.sin(b) + z1 * Math.cos(b);
+    return [x2 * Math.cos(c) - y1 * Math.sin(c), x2 * Math.sin(c) + y1 * Math.cos(c), z2];
+  };
+  for (const [boneId, track] of Object.entries(anim.bones)) {
+    const bone = model.bones.find((b) => b.id === boneId);
+    if (!bone || !track.rotation.length) continue;
+    const corners = model.cubes.filter((c) => c.bone === boneId).flatMap((c) => [0, 1, 2, 3, 4, 5, 6, 7].map((i): Vec3 => [
+      (i & 1 ? c.to : c.from)[0] - bone.origin[0], (i & 2 ? c.to : c.from)[1] - bone.origin[1], (i & 4 ? c.to : c.from)[2] - bone.origin[2],
+    ]));
+    if (!corners.length) continue;
+    const tip = corners.reduce((best, v) => (Math.hypot(...v) > Math.hypot(...best) ? v : best));
+    const key = track.rotation.reduce((best, k) => (Math.hypot(...k.value) > Math.hypot(...best.value) ? k : best));
+    if (Math.hypot(...key.value) < 5) continue;
+    const rest = rotate(tip, bone.rotation);
+    const moved = rotate(tip, [bone.rotation[0] + key.value[0], bone.rotation[1] + key.value[1], bone.rotation[2] + key.value[2]]);
+    const d = moved.map((v, i) => v - rest[i]);
+    const parts: [number, string][] = [
+      [d[2], d[2] < 0 ? "forward (-Z, towards the face)" : "backward (+Z)"],
+      [d[1], d[1] > 0 ? "up" : "down"],
+      [d[0], d[0] < 0 ? "to the mob's left (-X)" : "to the mob's right (+X)"],
+    ];
+    const words = parts.filter(([v]) => Math.abs(v) >= 1).sort((p, q) => Math.abs(q[0]) - Math.abs(p[0])).map(([v, w]) => `${Math.round(Math.abs(v))}px ${w}`);
+    if (words.length) out.push(`${bone.name} @${key.time}s rotation [${key.value.join(", ")}]: its tip moves ${words.join(", ")}`);
+  }
+  return out;
+}
+
 export function deleteTargets(model: EntityModel, targets: string[]): EntityModel {
   let m = model;
   for (const t of targets) {

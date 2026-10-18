@@ -45,11 +45,16 @@ public final class ModElements {
         FluidSpecs.register(modId, modBus, load(modId, "fluids", FluidSpec[].class));
         ProfessionSpecs.register(modId, modBus, load(modId, "villager_professions", ProfessionSpec[].class));
         PlantSpecs.register(modId, modBus, load(modId, "plants", PlantSpec[].class));
+        // Sounds first: other elements may refer to the sound events.
+        sheepfromheaven.screenspec.runtime.sound.SoundSpecs.register(modId, modBus,
+            load(modId, "sounds", sheepfromheaven.screenspec.runtime.sound.SoundSpec[].class));
         EntitySpecs.register(modId, modBus, load(modId, "entities", EntitySpec[].class));
         ParticleSpecs.register(modId, modBus, load(modId, "particles", ParticleSpec[].class));
         KeyBindingSpecs.register(modId, modBus, load(modId, "key_bindings", KeyBindingSpec[].class));
         BoatSpecs.register(modId, modBus, load(modId, "boats", BoatSpec[].class));
         ProjectileSpecs.register(modId, modBus, load(modId, "projectiles", ProjectileSpec[].class));
         ArmorTrimSpecs.register(modId, modBus, load(modId, "armor_trims", ArmorTrimSpec[].class));
+        sheepfromheaven.screenspec.runtime.mesh.MeshModelSpecs.register(modId, modBus,
+            load(modId, "mesh_models", sheepfromheaven.screenspec.runtime.mesh.MeshModelSpec[].class));
     }
 }

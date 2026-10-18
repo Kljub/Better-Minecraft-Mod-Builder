@@ -76,8 +76,28 @@ function readLocalProjects(): StoredProjectLike[] {
   }
 }
 
+/** A session with only the current state plus up to `steps` undo steps before it. */
+function trimSession(session: unknown, steps: number): unknown {
+  const s = session as { history?: unknown[]; cursor?: number } | null;
+  if (!s || !Array.isArray(s.history)) return session;
+  const cursor = Math.min(Math.max(0, s.cursor ?? s.history.length - 1), s.history.length - 1);
+  const start = Math.max(0, cursor - steps);
+  return { ...s, history: s.history.slice(start, cursor + 1), cursor: cursor - start };
+}
+
+/**
+ * localStorage holds only ~5 MB per origin: projects are written with 10 undo steps, and if even
+ * that doesn't fit, with the current state only (the account keeps the full copy either way).
+ */
 function writeLocalProjects(list: StoredProjectLike[]) {
-  localStorage.setItem(PROJECTS_KEY, JSON.stringify(list));
+  for (const steps of [10, 0]) {
+    try {
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(list.map((p) => ({ ...p, session: trimSession(p.session, steps) }))));
+      return;
+    } catch (e) {
+      if (steps === 0) throw new Error(`This browser's storage is full — ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 }
 
 const putProject = (p: StoredProjectLike) =>

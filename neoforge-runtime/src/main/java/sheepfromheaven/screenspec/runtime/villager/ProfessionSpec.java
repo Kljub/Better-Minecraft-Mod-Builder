@@ -11,4 +11,6 @@ public final class ProfessionSpec {
     public String jobSiteBlock;
     /** sound id played while working at the job site; empty = none */
     public String workSound = "";
+    /** how many villagers of one village may hold this job: -1 = unlimited, 0 = none */
+    public int maxPerVillage = -1;
 }
