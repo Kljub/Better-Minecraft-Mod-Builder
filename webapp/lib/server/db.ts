@@ -145,6 +145,46 @@ const SCHEMA = [
     INDEX (kind),
     FOREIGN KEY (user_id) REFERENCES mmb_users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  // Minecraft companion mod (companion-mod/): per-user API tokens (only their SHA-256 is stored).
+  `CREATE TABLE IF NOT EXISTS mmb_mod_tokens (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    token_hash CHAR(64) NOT NULL UNIQUE,
+    label VARCHAR(100) NOT NULL,
+    created_at BIGINT NOT NULL,
+    last_used_at BIGINT NULL,
+    INDEX (user_id),
+    FOREIGN KEY (user_id) REFERENCES mmb_users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  // Structures from the mod — AI generations (prompt + raw build ops + expanded blocks) and uploaded
+  // .nbt files, kept as training data. imported_at = picked up by an open editor (the "inbox").
+  `CREATE TABLE IF NOT EXISTS mmb_structures (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT UNSIGNED NOT NULL,
+    project_key VARCHAR(128) NULL,
+    name VARCHAR(100) NOT NULL,
+    source VARCHAR(16) NOT NULL,
+    parent_id BIGINT UNSIGNED NULL,
+    prompt TEXT NULL,
+    provider VARCHAR(16) NULL,
+    model VARCHAR(128) NULL,
+    account_label VARCHAR(100) NULL,
+    ai_json LONGTEXT NULL,
+    palette_json MEDIUMTEXT NULL,
+    blocks_json LONGTEXT NULL,
+    size_x INT NOT NULL DEFAULT 0,
+    size_y INT NOT NULL DEFAULT 0,
+    size_z INT NOT NULL DEFAULT 0,
+    block_count INT NOT NULL DEFAULT 0,
+    nbt LONGBLOB NULL,
+    duration_ms INT NULL,
+    created_at BIGINT NOT NULL,
+    uploaded_at BIGINT NULL,
+    imported_at BIGINT NULL,
+    INDEX (user_id, imported_at),
+    INDEX (source),
+    FOREIGN KEY (user_id) REFERENCES mmb_users(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
 /** The pool, with the tables created on first use. */

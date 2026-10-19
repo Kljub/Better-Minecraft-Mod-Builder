@@ -7,6 +7,7 @@ import { writeElementFiles, writeElementArchiveCopies, hasElements, elementTextu
 import { loadStructureFiles } from "./structureStore";
 import { primeMeshPacks } from "./model3d/meshPackStore";
 import { loadAllTextures } from "./textureStore";
+import { fetchRuntimeJar, modIdProblem, versionProblem, writeModJarMeta, type ModJarMeta } from "./modJar";
 import type {
   ScreenSpec, WidgetSpec, ItemSpec, BlockSpec, BlockFaceKey, CreativeTabSpec, CustomAttributeSpec, EffectSpec, PotionSpec,
   AchievementSpec, RecipeSpec, TradeSpec, TradeItemStack, LootEntrySpec, BiomeSpec, DimensionSpec,
@@ -841,4 +842,38 @@ export async function downloadFullProjectExport(projectName: string, projectJson
 
   const zipBlob = await zip.generateAsync({ type: "blob" });
   downloadBlob(zipBlob, `${projectName}.zip`);
+}
+
+export interface ModJarResult {
+  fileName: string;
+  /** the ScreenSpec runtime is inside the jar (else players install it separately) */
+  runtimeBundled: boolean;
+  textures: number;
+}
+
+/**
+ * "Build mod (.jar)": everything the project generates (the same files as the mod export) plus
+ * mod metadata, as a jar for the mods folder — see lib/modJar. Throws with a readable message when
+ * the mod id or version can't be used.
+ */
+export async function buildModJar(input: ExportBundleInput, meta: Omit<ModJarMeta, "modId">): Promise<{ blob: Blob } & ModJarResult> {
+  const r = resolveInput(input);
+  const modId = resolveModId(r, input.modId);
+  const problem = modIdProblem(modId) ?? versionProblem(meta.version);
+  if (problem) throw new Error(problem);
+  const allTextures = await loadAllTextures();
+  Object.assign(allTextures, await loadElementBinaries(r));
+  const runtime = await fetchRuntimeJar(r.mcVersion);
+
+  const zip = new JSZip();
+  writeModJarMeta(zip, { ...meta, modId }, r.mcVersion, runtime);
+  const textures = writeGeneratedFiles(zip, "", modId, r, allTextures);
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", mimeType: "application/java-archive" });
+  return { blob, fileName: `${modId}-${meta.version}.jar`, runtimeBundled: !!runtime, textures };
+}
+
+export async function downloadModJar(input: ExportBundleInput, meta: Omit<ModJarMeta, "modId">): Promise<ModJarResult> {
+  const { blob, ...result } = await buildModJar(input, meta);
+  downloadBlob(blob, result.fileName);
+  return result;
 }

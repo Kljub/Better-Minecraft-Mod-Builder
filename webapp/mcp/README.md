@@ -11,13 +11,16 @@ AI client ──stdio (MCP)──▶ mcp/server.mjs ──HTTP 127.0.0.1:8790─
 
 ## Setup
 
-1. Claude Code (from the repo's `webapp/` folder):
+1. Register the server once (from the repo's `webapp/` folder):
 
    ```bash
-   claude mcp add mc-designer -- node "$(pwd)/mcp/server.mjs"
+   claude mcp add --scope user mc-designer -- node "$(pwd)/mcp/server.mjs"   # Claude Code
+   codex mcp add mc-designer -- node "$(pwd)/mcp/server.mjs"                  # Codex
    ```
 
    Other clients: add a stdio server with command `node` and argument `/absolute/path/to/webapp/mcp/server.mjs`.
+   Without a registration nothing starts the server, and the status bar keeps saying
+   "waiting for MCP server".
 
 2. Open a project in the designer and click **AI bridge** in the status bar (bottom right).
    The dot turns green once the MCP server is running (your AI client starts it).
@@ -41,3 +44,5 @@ Every tool call is one undoable step in the editor (Ctrl+Z).
 - Port: `MC_DESIGNER_MCP_PORT` (default 8790). The bridge only listens on 127.0.0.1 and only
   answers browser pages served from localhost / private LAN addresses.
 - The editor tab must stay open; commands time out after 60 s.
+- Several AI clients at once (e.g. Claude Code and Codex): the first server owns the port, the
+  others relay their tool calls through it, and one of them takes the port over when it exits.

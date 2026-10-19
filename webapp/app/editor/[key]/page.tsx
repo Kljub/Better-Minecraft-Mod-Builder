@@ -50,7 +50,7 @@ import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
 import { folderOfKey, forgetKey, moveToFolder, renameAssignedKey } from "@/lib/resourceFolders";
 import EntityModelGeneratorPanel from "@/components/EntityModelGeneratorPanel";
 import CodexChatPanel from "@/components/CodexChatPanel";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Package } from "lucide-react";
 import { runTool, type EditorApi } from "@/lib/ai/editorTools";
 import { BUILTIN_COLLECTIONS } from "@/lib/ai/builtinCollections";
 import type { EntityModel } from "@/lib/model3d/types";
@@ -88,7 +88,9 @@ import {
   loadBlockTemplates, saveBlockTemplates, type BlockTemplate,
 } from "@/lib/templates";
 import { loadAttributePresets, saveAttributePresets, type AttributePreset } from "@/lib/attributePresets";
-import { downloadBlob, downloadExport, downloadFullProjectExport } from "@/lib/exportBundle";
+import { downloadBlob, downloadExport, downloadFullProjectExport, downloadModJar } from "@/lib/exportBundle";
+import BuildModDialog from "@/components/BuildModDialog";
+import ModStructureInbox from "@/components/ModStructureInbox";
 import { buildBedrockAddon } from "@/lib/bedrockAddon";
 import { readSpecBundle, readProjectScreens, readProjectFolders, readScreenExport, mergeSpecsById, type ImportCategory, type SpecBundle } from "@/lib/importBundle";
 import { detectImport } from "@/lib/importDetect";
@@ -1934,6 +1936,15 @@ export default function EditorPage() {
     }
   }, [projectKey, screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements, entry.elementFolders, mcVersion]);
 
+  const [buildModOpen, setBuildModOpen] = useState(false);
+  const handleBuildMod = useCallback((meta: { version: string; displayName: string; description?: string; authors?: string }) =>
+    downloadModJar({
+      screens: screens.map(buildExportedScreen), items, blocks, creativeTabs, customAttributes, effects, potions,
+      achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements,
+      modId: friendlyModId(), mcVersion,
+    }, meta),
+  [screens, items, blocks, creativeTabs, customAttributes, effects, potions, achievements, recipes, trades, lootEntries, biomes, dimensions, armors, elements, friendlyModId, mcVersion]);
+
   const handleImportProjectClick = () => importProjectRef.current?.click();
   const handleImportProjectFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2633,6 +2644,8 @@ export default function EditorPage() {
 
   return (
     <>
+      {/* structures sent from Minecraft by the companion mod (/mmb generate, /mmb upload) */}
+      <ModStructureInbox projectKey={projectKey} onFiles={(files) => addStructureFiles(files, "From Minecraft")} />
       {dropActive && (
         <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/70 p-6" data-testid="drop-import-overlay">
           <div className="rounded-lg border-2 border-dashed border-primary bg-card px-8 py-6 text-center shadow-lg">
@@ -2692,6 +2705,7 @@ export default function EditorPage() {
               onToggleTryMode={() => { setTryMode((v) => { if (!v) setSelectedId(null); return !v; }); }}
               onScreenChange={(patch) => commitScreen({ ...screen, ...patch })}
               onExportProject={handleExportProject}
+              onBuildMod={() => setBuildModOpen(true)}
               onOpenChat={() => setChatOpen((v) => !v)}
               chatOpen={chatOpen}
               onImportProject={handleImportProjectClick}
@@ -2720,6 +2734,9 @@ export default function EditorPage() {
                 <MessageSquare className="h-3.5 w-3.5" /> {chatProviderLabel(chatProvider)}
               </Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleExportProject}>Export Project</Button>
+              <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={() => setBuildModOpen(true)} title="Build the whole project into one mod .jar">
+                <Package className="h-3.5 w-3.5" /> Build Mod
+              </Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleImportProjectClick}>Import Project</Button>
             </div>
           )}
@@ -2782,8 +2799,8 @@ export default function EditorPage() {
               runEditorTool={(tool, args) => runTool(() => editorApiRef.current(), tool, args)}
             />
           ) : mainView?.kind === "section" && !isToolSection(mainView.key) ? (
-            // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
             <>
+              {/* eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked */}
               <CategoryView key={mainView.key} {...categoryView(mainView.key)} />
               {mainView.key === "creativeTabs" && (
                 <TexturePickerModal open={tabIconFor !== null} packTextures={packTextures} current={tabIconFor !== null ? creativeTabs[tabIconFor]?.icon ?? "" : ""}
@@ -2888,6 +2905,7 @@ export default function EditorPage() {
                         projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
                         projectScreens: screens.map((s) => s.id),
                         packTextureKeys: vanillaTextureKeys,
+                        elementIds: Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])),
                       }}
                       onChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx,
                         withLabelId(activeElementDef, activeElement, patch, elements[activeElementDef.kind] ?? [],
@@ -3195,7 +3213,9 @@ export default function EditorPage() {
               type="button"
               className={`${agentRun.running ? "" : "ml-auto "}flex items-center gap-1.5 rounded-sm px-1 hover:bg-accent hover:text-foreground`}
               title={bridgeEnabled
-                ? `AI bridge ${bridge.status} (MCP server on 127.0.0.1:8790)${bridge.lastTool ? ` — last: ${bridge.lastTool}` : ""}. Click to turn off.`
+                ? bridge.status === "connecting"
+                  ? "Waiting for the MCP server on 127.0.0.1:8790. Your AI client starts it: register it once with `claude mcp add --scope user mc-designer -- node <repo>/webapp/mcp/server.mjs` (Codex: `codex mcp add mc-designer -- node …`), then start a Claude Code / Codex session. Click to turn off."
+                  : `AI bridge ${bridge.status} (MCP server on 127.0.0.1:8790)${bridge.lastTool ? ` — last: ${bridge.lastTool}` : ""}. Click to turn off.`
                 : "Let an AI client (Claude Code via the mc-designer MCP server) work in this editor. Click to turn on."}
               onClick={() => setBridgeEnabled(!bridgeEnabled)}
               data-testid="ai-bridge-toggle"
@@ -3263,6 +3283,9 @@ export default function EditorPage() {
           className="hidden"
           onChange={handleImportCategoryFile}
         />
+        {buildModOpen && (
+          <BuildModDialog open onOpenChange={setBuildModOpen} projectKey={projectKey} modId={friendlyModId()} mcVersion={mcVersion} onBuild={handleBuildMod} />
+        )}
       </SidebarProvider>
     </>
   );

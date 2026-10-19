@@ -10,7 +10,11 @@ import { ELEMENT_KINDS } from "./registry";
  * (assets/<modId>/screenspec/elements/<name>.json — own folder so it can never clash with a
  * screen id) for kinds neoforge-runtime registers in Java.
  */
-export function writeElementFiles(zip: JSZip, prefix: string, elements: ElementsByKind, ctx: ExportContext): void {
+export function writeElementFiles(zip: JSZip, prefix: string, elements: ElementsByKind, exportCtx: ExportContext): void {
+  const ctx: ExportContext = {
+    ...exportCtx,
+    elementIds: Object.fromEntries(Object.entries(elements).map(([kind, list]) => [kind, list.map((el) => `${exportCtx.modId}:${el.id}`)])),
+  };
   const lang: Record<string, string> = {};
   const tags = new Map<string, Set<string>>();
   const manifests = new Map<string, unknown[]>();
@@ -20,7 +24,7 @@ export function writeElementFiles(zip: JSZip, prefix: string, elements: Elements
     if (def.standalone) continue; // e.g. resource packs — downloaded on their own, not part of the mod
     for (const spec of elements[def.kind] ?? []) {
       for (const f of def.files(spec, ctx)) zip.file(`${prefix}${f.path}`, f.content);
-      const shared = def.shared?.(spec, { modId: ctx.modId, mcVersion: ctx.mcVersion });
+      const shared = def.shared?.(spec, { modId: ctx.modId, mcVersion: ctx.mcVersion, elementIds: ctx.elementIds });
       if (shared?.lang) Object.assign(lang, shared.lang);
       for (const [path, values] of Object.entries(shared?.tags ?? {})) {
         const set = tags.get(path) ?? new Set<string>();

@@ -36,7 +36,9 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     "/tmp/next-dist-mc-ui-builder/types/**/*.ts",
-    "/tmp/next-dist-mc-ui-builder/dev/types/**/*.ts"
+    "/tmp/next-dist-mc-ui-builder/dev/types/**/*.ts",
+    "/tmp/next-dist-mc-ui-builder-pw/types/**/*.ts",
+    "/tmp/next-dist-mc-ui-builder-pw/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

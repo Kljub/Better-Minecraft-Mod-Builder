@@ -119,6 +119,8 @@ export async function runStructured(
   onQuota?: (q: Quota) => void,
   /** reference images (base64 without data: prefix), e.g. renders of a 3D model to rig */
   images: StructuredImage[] = [],
+  /** longer than the default 3 min for big answers (e.g. whole structures) */
+  timeoutMs?: number,
 ): Promise<unknown> {
   if (provider === "ollama") {
     const name = model || (await ollamaModels())?.[0];
@@ -159,7 +161,7 @@ export async function runStructured(
           { type: "text", text: prompt },
         ] } }) + "\n";
       }
-      const { code, stdout, stderr } = await run("claude", args, { stdin, cwd: dir, env: account?.env });
+      const { code, stdout, stderr } = await run("claude", args, { stdin, cwd: dir, env: account?.env, timeoutMs });
       type ResultEvent = { is_error?: boolean; result?: string; structured_output?: unknown };
       let out: ResultEvent | null = null;
       for (const line of stdout.split("\n")) {
@@ -193,7 +195,7 @@ export async function runStructured(
     args.push("-");
     const imageList = images.length ? `\n\nAttached images, in order:\n${images.map((img, i) => `${i + 1}. ${img.label || "image"}`).join("\n")}` : "";
     // codex exec has no system-prompt flag — instructions go in front of the request.
-    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}${imageList}`, cwd: dir, env: account?.env });
+    const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}${imageList}`, cwd: dir, env: account?.env, timeoutMs });
     if (code !== 0) throw new Error(`codex failed: ${lastLines(stderr || stdout)}`);
     return JSON.parse(await readFile(outPath, "utf-8"));
   } finally {

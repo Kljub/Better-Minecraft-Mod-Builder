@@ -1,0 +1,22 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "mmb_companion"
+version = "${file.jarVersion}"
+displayName = "Mod Builder Companion"
+description = "Generates structures in-game with Claude / Codex through the MC Mod Builder web UI and uploads them (.nbt) straight into your project."
+
+# Commands run on the (integrated or dedicated) server — no client part needed.
+[[dependencies.mmb_companion]]
+    modId = "neoforge"
+    type = "required"
+    versionRange = "[21,)"
+    ordering = "NONE"
+
+[[dependencies.mmb_companion]]
+    modId = "minecraft"
+    type = "required"
+    versionRange = "[1.21,)"
+    ordering = "NONE"

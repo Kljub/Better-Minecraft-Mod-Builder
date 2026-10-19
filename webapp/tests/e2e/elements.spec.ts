@@ -73,3 +73,38 @@ test("attribute pickers show namespaces; a custom attribute opens in its editor 
   await expect(page.locator("div:has(> :text-is('Custom Attribute'))").first()).toBeVisible();
   await expect(page.locator("div:has(> :text-is('ID')) input").first()).toHaveValue(attrId);
 });
+
+test("an enchantment can be incompatible with several groups, vanilla and custom enchantments", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, { id: "main", width: 320, height: 180, modId: "mymod", widgets: [] });
+  await openEditor(page);
+
+  await page.getByTitle("Enchantments", { exact: true }).click();
+  const grid = page.getByTestId("category-view");
+  await grid.getByRole("button", { name: "New" }).first().click();
+  const editor = page.getByTestId("element-editor");
+  await editor.locator('[data-field="name"] input').fill("Frost Bite");
+  await page.getByTitle("Enchantments", { exact: true }).click();
+  await grid.getByRole("button", { name: "New" }).first().click();
+  await editor.locator('[data-field="name"] input').fill("Life Steal");
+
+  const field = editor.locator('[data-field="exclusiveSet"]');
+  const add = field.getByRole("combobox", { name: "Add" });
+  // The project's other enchantment is offered, the open one isn't.
+  await expect(add.locator('option[value="mymod:frost_bite"]')).toHaveCount(1);
+  await expect(add.locator('option[value="mymod:life_steal"]')).toHaveCount(0);
+  await add.selectOption("#minecraft:exclusive_set/damage");
+  await add.selectOption("minecraft:fire_aspect");
+  await add.selectOption("mymod:frost_bite");
+  await expect(field.getByTitle("Remove Frost Bite")).toBeVisible();
+  // Chosen values leave the dropdown.
+  await expect(add.locator('option[value="minecraft:fire_aspect"]')).toHaveCount(0);
+
+  await page.getByText("data/mymod/enchantment/life_steal.json").click();
+  await expect(page.getByText('"exclusive_set": "#mymod:exclusive_set/life_steal"')).toBeVisible();
+  await expect(page.getByText("data/mymod/tags/enchantment/exclusive_set/life_steal.json")).toBeVisible();
+
+  await field.getByTitle("Remove Fire Aspect").click();
+  await field.getByTitle("Remove Sharpness/Smite/…").click();
+  await expect(page.getByText('"exclusive_set": "mymod:frost_bite"')).toBeVisible();
+});

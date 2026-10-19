@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square, MessageSquare } from "lucide-react";
+import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square, MessageSquare, Package } from "lucide-react";
 import Link from "next/link";
 import type { ScreenSpec, BindingsSchema } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,8 @@ interface Props {
   onToggleTryMode: () => void;
   onScreenChange: (patch: Partial<ScreenSpec>) => void;
   onExportProject: () => void;
+  /** opens "Build mod (.jar)" */
+  onBuildMod?: () => void;
   /** opens the Codex Chat / Claude Chat panel (editor header) */
   onOpenChat?: () => void;
   chatOpen?: boolean;
@@ -55,7 +57,7 @@ interface Props {
 export default function Toolbar({
   screen, gridSize, showGrid, snapToParent, snapToSiblings, canUndo, canRedo, hasSelection, onCenterHorizontal, onCenterVertical, tryMode,
   onUndo, onRedo, onGridSizeChange, onToggleGrid, onToggleSnapToParent, onToggleSnapToSiblings, onToggleTryMode,
-  onScreenChange, onExportProject, onOpenChat, chatOpen, onImportProject, onCopyJava, onResetTextures, onViewTextures, onExtractPack,
+  onScreenChange, onExportProject, onBuildMod, onOpenChat, chatOpen, onImportProject, onCopyJava, onResetTextures, onViewTextures, onExtractPack,
   scale, onZoomIn, onZoomOut, onZoomReset, onSaveToTestMod,
   bindingsSchema, onUpdateBindingsSchema, actions, onUpdateActions, modId,
 }: Props) {
@@ -179,6 +181,11 @@ export default function Toolbar({
         <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onExportProject} title="Export project (all screens)">
           <FolderDown className="h-4 w-4" />
         </Button>
+        {onBuildMod && (
+          <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onBuildMod} title="Build mod (.jar)">
+            <Package className="h-4 w-4" />
+          </Button>
+        )}
         <Separator orientation="vertical" className="mx-1 h-4" />
         <BindingsModal
           schema={bindingsSchema}

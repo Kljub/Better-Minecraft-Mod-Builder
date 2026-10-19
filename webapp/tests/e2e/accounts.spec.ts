@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import mysql from "mysql2/promise";
 import { seedTextures } from "../support/seed";
+import { sampleStructure } from "../support/nbtWriter";
 
 /**
  * Accounts + cloud storage. Needs a server with accounts on (MMB_DB_* in .env.local); the default
@@ -121,6 +122,42 @@ test("Settings → AI links a Claude account (stored encrypted, never sent back)
   page.on("dialog", (d) => d.accept());
   await panel.getByRole("button", { name: "Remove" }).click();
   await expect(panel.getByTestId("ai-account")).toHaveCount(0);
+});
+
+test("companion mod: a token from Settings uploads a structure that the open editor imports", async ({ page }) => {
+  await seedTextures(page);
+  await page.goto("/");
+  const form = page.getByTestId("login-form");
+  await form.getByLabel("Username").fill(username);
+  await form.getByLabel("Password", { exact: true }).fill(password);
+  await form.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByTestId("account-menu")).toBeVisible();
+  await page.goto("/editor/project_acct");
+  await page.getByTitle("Settings").first().evaluate((b: HTMLElement) => b.click());
+  await page.getByRole("button", { name: "AI", exact: true }).click();
+  const panel = page.getByTestId("mod-tokens");
+  await panel.getByLabel("Token name").fill("e2e pc");
+  await panel.getByRole("button", { name: "Create token" }).click();
+  const command = await panel.getByTestId("mod-token-fresh").locator("code").textContent();
+  const token = /(mmb_[\w-]+)$/.exec(command ?? "")?.[1];
+  expect(command).toMatch(/^\/mmb connect http/);
+  expect(token).toBeTruthy();
+  await expect(panel).toContainText("e2e pc");
+  await page.keyboard.press("Escape");
+
+  // What the mod does after /mmb upload (no cookie, bearer token only).
+  const auth = { authorization: `Bearer ${token}` };
+  expect((await page.request.get("/api/mod/ping", { headers: { authorization: "Bearer mmb_wrongwrongwrongwrongwrong" } })).status()).toBe(401);
+  expect((await (await page.request.get("/api/mod/ping", { headers: auth })).json()).username).toBe(username);
+  const up = await page.request.post("/api/mod/structures/upload?name=Mod%20Tower", { headers: auth, data: sampleStructure(3, 4, 3) });
+  expect(up.ok()).toBe(true);
+
+  await page.getByTitle("Structures", { exact: true }).click();
+  const view = page.getByTestId("category-view");
+  await expect(view.getByText("mod_tower", { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(view.getByText("From Minecraft")).toBeVisible();
+  // Claimed once: the inbox is empty now.
+  expect((await (await page.request.get("/api/mod/inbox?project=project_acct")).json()).items).toEqual([]);
 });
 
 test("API refuses requests without a session or from another origin", async ({ request }) => {

@@ -91,7 +91,9 @@ Export as JSON Lines, one model per line with the texture PNG as base64:
 
 Codex Chat conversations are training data too: every turn is stored in `mmb_ai_chats` with the whole conversation up to and including it (`messages`, user/assistant) and the editor tool calls that answered it (`tools`), grouped by `conversation_id`. Without accounts the same lines go to `webapp/training-data/chat-turns.jsonl` (git-ignored). Export: `GET /api/dataset?type=chats` (your own) or `npm run dataset:export -- chats.jsonl --chats` (all users).
 
-If other people use your server, tell them their models and chat conversations are collected.
+Structures from the companion mod (see [AI structures in Minecraft](#4-ai-structures-in-minecraft-companion-mod)) go to `mmb_structures`: the prompt, the AI's raw build ops, the expanded block list, the `.nbt` as placed, and, as `source = "edited"` rows with `parent_id`, the version a player fixed by hand and uploaded again. Export: `npm run dataset:export -- structures.jsonl --structures`.
+
+If other people use your server, tell them their models, structures and chat conversations are collected.
 
 The tables (`mmb_*`) are created on first use. Keep `MMB_SECRET_KEY` safe: without it, the stored tokens can't be decrypted, and you'd have to re-link the accounts. The AI routes (which run the Claude/Codex CLIs) still only work on the local dev server.
 
@@ -169,6 +171,14 @@ Without a terminal: open the **Entity Model Generator** tab and type your prompt
 ### 3. Local LLM (Ollama, optional)
 
 Install [Ollama](https://ollama.com/download), run `ollama pull qwen3`, and select Ollama under **Settings → AI**. If Ollama doesn't run on `http://127.0.0.1:11434`, set `OLLAMA_HOST`.
+
+### 4. AI structures in Minecraft (companion mod)
+
+[`companion-mod/`](companion-mod/README.md) is a small NeoForge mod for Minecraft 26.2 and 1.21.1. In-game, `/mmb generate a ruined watchtower with a spiral staircase` asks the web UI (by domain or IP) to design the structure with Claude or Codex. It places the structure in front of you and uploads it as an `.nbt` file. The open project shows it in its **Structures** tab, folder "From Minecraft". Requirements: accounts (MySQL) and the dev server, because the AI routes only run there.
+
+1. Get the mod from the web UI (**Settings → AI → Minecraft mod**) and put it into your `mods/` folder. The server needs it built first: run `cd companion-mod && ./gradlew build` for 26.2, and add `-Pmc=1.21.1` for 1.21.1.
+2. In the web UI, go to **Settings → AI → Minecraft mod → Create token**.
+3. In Minecraft, run the command it shows: `/mmb connect http://<server-ip>:3000 mmb_…`
 
 ## Using the runtime library in your NeoForge mod
 

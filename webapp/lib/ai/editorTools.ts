@@ -105,6 +105,7 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
         fields: k.customEditor ? "use the model tools (create_model, add_cubes, …)" : k.fields.map((f) => ({
           key: f.key, type: f.type, label: f.label,
           ...("options" in f ? { options: f.options.map((o) => o.value) } : {}),
+          ...(f.type === "multiselect" && f.moreOptions ? { alsoAccepts: "the project's own elements of this kind, as <modid>:<id>" } : {}),
           ...(f.type === "list" ? { itemFields: f.fields.map((x) => ({ key: x.key, type: x.type })) } : {}),
         })),
         defaults: k.customEditor ? undefined : k.defaults(),

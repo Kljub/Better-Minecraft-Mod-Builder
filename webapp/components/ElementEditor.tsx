@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Download, FileJson, Loader2, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileJson, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import TexturePickerModal from "@/components/TexturePickerModal";
@@ -14,7 +14,7 @@ import { useTextures } from "@/lib/TextureContext";
 import { loadAllTextures } from "@/lib/textureStore";
 import { buildStandaloneZip } from "@/lib/elements/export";
 import { downloadBlob } from "@/lib/exportBundle";
-import type { ElementKindDef, ElementSpec, FieldContext, FieldDef } from "@/lib/elements/types";
+import type { ElementKindDef, ElementSpec, FieldContext, FieldDef, SelectOption } from "@/lib/elements/types";
 import type { McVersion } from "@/lib/mcVersion";
 
 /**
@@ -28,7 +28,7 @@ export default function ElementEditor({ def, spec, ctx, onChange }: {
   ctx: FieldContext;
   onChange: (patch: Partial<ElementSpec>) => void;
 }) {
-  const problems = def.validate?.(spec, { modId: ctx.modId, mcVersion: ctx.mcVersion }) ?? [];
+  const problems = def.validate?.(spec, { modId: ctx.modId, mcVersion: ctx.mcVersion, elementIds: ctx.elementIds }) ?? [];
   const Icon = def.icon;
   return (
     <div className="flex flex-col gap-3 p-4 text-xs" data-testid="element-editor">
@@ -68,7 +68,7 @@ export function FieldGrid({ fields, value, ctx, onChange }: {
             </label>
           ) : (
             <Field label={f.label}>
-              <FieldInput field={f} value={value[f.key]} ctx={ctx} onChange={(v) => onChange({ [f.key]: v })} />
+              <FieldInput field={f} value={value[f.key]} spec={value as ElementSpec} ctx={ctx} onChange={(v) => onChange({ [f.key]: v })} />
             </Field>
           )}
           {f.help && <p className="mt-0.5 text-[10px] text-muted-foreground">{f.help}</p>}
@@ -78,9 +78,10 @@ export function FieldGrid({ fields, value, ctx, onChange }: {
   );
 }
 
-function FieldInput({ field, value, ctx, onChange }: {
+function FieldInput({ field, value, spec, ctx, onChange }: {
   field: FieldDef;
   value: unknown;
+  spec: ElementSpec;
   ctx: FieldContext;
   onChange: (v: unknown) => void;
 }) {
@@ -146,10 +147,14 @@ function FieldInput({ field, value, ctx, onChange }: {
         </>
       );
     case "multiselect": {
-      const selected = Array.isArray(value) ? (value as string[]) : [];
+      // A single string is an older single-choice value of the same field.
+      const stored = Array.isArray(value) ? (value as string[]) : text ? [text] : [];
+      const selected = field.normalize ? field.normalize(stored, ctx) : stored;
+      const options = [...field.options, ...(field.moreOptions?.(ctx, spec) ?? [])];
+      if (field.compact) return <CompactMultiSelect options={options} selected={selected} onChange={onChange} />;
       return (
         <div className="flex flex-wrap gap-1">
-          {field.options.map((o) => {
+          {options.map((o) => {
             const on = selected.includes(o.value);
             return (
               <button key={o.value} type="button" aria-pressed={on}
@@ -192,6 +197,46 @@ function FieldInput({ field, value, ctx, onChange }: {
       );
     }
   }
+}
+
+/** Selected values as removable chips, plus a grouped dropdown that adds one more. */
+function CompactMultiSelect({ options, selected, onChange }: {
+  options: SelectOption[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const labelOf = (v: string) => options.find((o) => o.value === v)?.label ?? v;
+  const free = options.filter((o) => !selected.includes(o.value));
+  const groups = [...new Set(free.map((o) => o.group ?? ""))];
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="compact-multiselect">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((v) => (
+            <span key={v} className="flex h-6 items-center gap-1 rounded-sm border border-primary bg-primary/15 pl-2 pr-0.5 text-[11px]">
+              {labelOf(v)}
+              <button type="button" title={`Remove ${labelOf(v)}`} onClick={() => onChange(selected.filter((x) => x !== v))}
+                className="flex h-4 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive hover:text-white">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <select
+        aria-label="Add"
+        className="h-7 w-full rounded-sm border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring [&_option]:bg-popover"
+        value=""
+        onChange={(e) => e.target.value && onChange([...selected, e.target.value])}
+      >
+        <option value="">{selected.length ? "Add another…" : "Add…"}</option>
+        {groups.map((g) => {
+          const items = free.filter((o) => (o.group ?? "") === g).map((o) => <option key={o.value} value={o.value}>{o.label}</option>);
+          return g ? <optgroup key={g} label={g}>{items}</optgroup> : items;
+        })}
+      </select>
+    </div>
+  );
 }
 
 /** "Download …" for standalone elements (ElementKindDef.download), e.g. a resource pack zip.

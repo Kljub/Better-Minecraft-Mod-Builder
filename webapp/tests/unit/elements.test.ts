@@ -53,6 +53,43 @@ describe("enchantment", () => {
   });
 });
 
+describe("enchantment incompatibility", () => {
+  const ids = { enchantment: ["mymod:thing", "mymod:frost"] };
+  it("a single choice is written straight into exclusive_set (old single-string value still works)", () => {
+    expect(parse(ENCHANTMENT, make(ENCHANTMENT, { exclusiveSet: ["minecraft:sharpness"] }), "data/mymod/enchantment/thing.json").exclusive_set).toBe("minecraft:sharpness");
+    expect(parse(ENCHANTMENT, make(ENCHANTMENT, { exclusiveSet: "#minecraft:exclusive_set/damage" }), "data/mymod/enchantment/thing.json").exclusive_set).toBe("#minecraft:exclusive_set/damage");
+    expect(parse(ENCHANTMENT, make(ENCHANTMENT), "data/mymod/enchantment/thing.json").exclusive_set).toBeUndefined();
+  });
+  it("several choices go into the mod's own exclusive_set tag (groups, vanilla and custom mixed)", () => {
+    const values = ["#minecraft:exclusive_set/damage", "minecraft:fire_aspect", "mymod:frost"];
+    const spec = make(ENCHANTMENT, { exclusiveSet: values });
+    expect(ENCHANTMENT.files(spec, { ...ctx, elementIds: ids })[0].content).toContain('"exclusive_set": "#mymod:exclusive_set/thing"');
+    expect(ENCHANTMENT.shared!(spec, { ...vctx, elementIds: ids }).tags!["data/mymod/tags/enchantment/exclusive_set/thing.json"]).toEqual(values);
+  });
+  it("namespaces bare ids — Minecraft would read them as minecraft:<id> and fail the datapack", () => {
+    const spec = make(ENCHANTMENT, { exclusiveSet: ["frost", "sharpness", "#exclusive_set/damage", "#own_set"] });
+    expect(ENCHANTMENT.shared!(spec, { ...vctx, elementIds: ids }).tags!["data/mymod/tags/enchantment/exclusive_set/thing.json"])
+      .toEqual(["mymod:frost", "minecraft:sharpness", "#minecraft:exclusive_set/damage", "#mymod:own_set"]);
+    expect(parse(ENCHANTMENT, make(ENCHANTMENT, { exclusiveSet: "frost" }), "data/mymod/enchantment/thing.json").exclusive_set).toBe("mymod:frost");
+  });
+  it("drops and reports custom enchantments that were deleted", () => {
+    const spec = make(ENCHANTMENT, { exclusiveSet: ["mymod:gone", "minecraft:smite"] });
+    expect(JSON.parse(ENCHANTMENT.files(spec, { ...ctx, elementIds: ids })[0].content as string).exclusive_set).toBe("minecraft:smite");
+    expect(ENCHANTMENT.validate!(spec, { ...vctx, elementIds: ids }).join()).toContain("mymod:gone");
+  });
+  it("offers the project's other enchantments, not itself", () => {
+    const field = ENCHANTMENT.fields.find((f) => f.key === "exclusiveSet");
+    if (field?.type !== "multiselect") throw new Error("not a multiselect");
+    const more = field.moreOptions!({ modId: "mymod", mcVersion: "26.2", projectItems: [], projectBlocks: [], elementIds: ids }, make(ENCHANTMENT));
+    expect(more.map((o) => o.value)).toEqual(["mymod:frost"]);
+  });
+  it("writeElementFiles drops references to enchantments not in the project", async () => {
+    const zip = new JSZip();
+    writeElementFiles(zip, "", { enchantment: [make(ENCHANTMENT, { exclusiveSet: ["mymod:gone", "mymod:b"] }), make(ENCHANTMENT, { id: "b" })] }, ctx);
+    expect(JSON.parse(await zip.file("data/mymod/enchantment/thing.json")!.async("string")).exclusive_set).toBe("mymod:b");
+  });
+});
+
 describe("banner pattern & painting", () => {
   it("bundles banner + shield textures (shield falls back to banner) and 16 dye-colour names", () => {
     const spec = make(BANNER_PATTERN, { name: "Skull", texture: "custom/skull.png" });

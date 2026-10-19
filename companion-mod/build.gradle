@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.143'
+}
+
+// One source tree, two Minecraft versions: ./gradlew build (26.2) or ./gradlew build -Pmc=1.21.1.
+// Shared code is in src/main/java; the few APIs that differ are in src/<version>/java/.../Compat.java.
+def targets = [
+    '26.2'  : [neo: neo_version_26_2, java: 25, src: 'v26_2'],
+    '1.21.1': [neo: neo_version_1_21_1, java: 21, src: 'v1_21_1'],
+]
+def mc = (project.findProperty('mc') ?: '26.2').toString()
+def target = targets[mc]
+if (target == null) throw new GradleException("Unknown -Pmc=${mc}; use one of ${targets.keySet()}")
+
+version = "${mod_version}+mc${mc}"
+group = group_id
+
+base {
+    archivesName = artifact_id
+}
+
+// Separate outputs per version, so switching doesn't throw away the other one's build.
+layout.buildDirectory = file("build/${mc}")
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(target.java)
+
+sourceSets.main.java.srcDir "src/${target.src}/java"
+
+neoForge {
+    version = target.neo
+
+    runs {
+        client {
+            client()
+            gameDirectory = file("run/${mc}")
+            if (org.gradle.internal.os.OperatingSystem.current().isMacOsX())
+                jvmArguments.add('-XstartOnFirstThread')
+        }
+        server {
+            server()
+            gameDirectory = file("run/${mc}-server")
+        }
+    }
+
+    mods {
+        mmb_companion {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    manifest {
+        attributes('Implementation-Version': project.version, 'Implementation-Title': artifact_id)
+    }
+}

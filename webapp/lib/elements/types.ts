@@ -19,6 +19,8 @@ export interface ElementSpec {
 export interface SelectOption {
   value: string;
   label: string;
+  /** optgroup heading in a compact multiselect's "add…" dropdown */
+  group?: string;
 }
 
 interface FieldBase {
@@ -46,7 +48,15 @@ export type FieldDef =
       /** an item/block id: adds the creative-inventory picker (blocks only for "block") */
       itemKind?: "item" | "block";
     })
-  | (FieldBase & { type: "multiselect"; options: SelectOption[] })
+  | (FieldBase & {
+      type: "multiselect"; options: SelectOption[];
+      /** extra options from the project (e.g. its other elements), appended to `options` */
+      moreOptions?: (ctx: FieldContext, spec: ElementSpec) => SelectOption[];
+      /** chips for the selected values + a grouped "add…" dropdown, for long option lists */
+      compact?: boolean;
+      /** cleans up stored values (e.g. namespaces bare ids) before they are shown or changed */
+      normalize?: (values: string[], ctx: FieldContext) => string[];
+    })
   /** repeatable group of sub-fields (stored as an array of objects) */
   | (FieldBase & { type: "list"; itemLabel: string; fields: FieldDef[]; newItem: () => Record<string, unknown> })
   /** a structure template (.nbt) stored in lib/structureStore; the value is its store key */
@@ -81,6 +91,8 @@ export interface GeneratedFile {
 export interface ExportContext {
   modId: string;
   mcVersion: McVersion;
+  /** see VersionContext.elementIds */
+  elementIds?: Record<string, string[]>;
   /** loaded image for a pack texture key, if this browser has it */
   texture: (key: string) => Blob | undefined;
   /** a binary file the element stored outside the project JSON (see ElementKindDef.files), if loaded */
@@ -110,6 +122,8 @@ export interface SharedOutputs {
 export interface VersionContext {
   modId: string;
   mcVersion: McVersion;
+  /** namespaced ids of the project's generic elements, by kind — to drop references to deleted ones */
+  elementIds?: Record<string, string[]>;
 }
 
 export interface ElementKindDef {

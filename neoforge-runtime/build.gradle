@@ -40,6 +40,14 @@ java {
     withSourcesJar()
 }
 
+// neoforge.mods.toml's ${file.jarVersion} reads this — also needed when the jar is nested
+// (Jar-in-Jar) inside a mod built by the designer's "Build mod (.jar)".
+jar {
+    manifest {
+        attributes('Implementation-Version': project.version, 'Implementation-Title': artifact_id)
+    }
+}
+
 modrinth {
     token = System.getenv("MODRINTH_TOKEN")
     projectId = modrinth_project_id

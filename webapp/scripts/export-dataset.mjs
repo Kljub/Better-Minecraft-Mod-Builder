@@ -8,6 +8,7 @@
  *   npm run dataset:export -- out.jsonl --deleted  # including removed ones
  *   npm run dataset:export -- out.jsonl --ai-only  # only models built from a prompt
  *   npm run dataset:export -- out.jsonl --chats    # Codex Chat turns instead (conversation → tool calls)
+ *   npm run dataset:export -- out.jsonl --structures  # companion-mod structures (prompt → build ops → blocks / .nbt)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -49,8 +50,30 @@ if (args.includes("--chats")) {
       ok: !!r.ok, created_at: Number(r.created_at),
     }) + "\n");
   }
-  chatOut.end();
+  await new Promise((resolve) => chatOut.end(resolve)); // flush before process.exit
   console.error(`${chats.length} chat turns → ${outPath}`);
+  process.exit(0);
+}
+if (args.includes("--structures")) {
+  // One line per structure: the prompt, the AI's raw build ops, the expanded blocks, and the .nbt as
+  // placed (and, for "edited" rows, the player's corrected version of the generation in parent_id).
+  const [structures] = await conn.execute(
+    "SELECT s.*, u.username FROM mmb_structures s JOIN mmb_users u ON u.id = s.user_id ORDER BY s.id");
+  await conn.end();
+  const parseJson = (v) => { if (v == null) return null; try { return JSON.parse(String(v)); } catch { return null; } };
+  const structOut = fs.createWriteStream(outPath);
+  for (const r of structures) {
+    structOut.write(JSON.stringify({
+      id: Number(r.id), user: r.username, name: r.name, source: r.source, parent_id: r.parent_id == null ? null : Number(r.parent_id),
+      prompt: r.prompt ?? null, provider: r.provider ?? null, model: r.model ?? null,
+      size: [r.size_x, r.size_y, r.size_z], block_count: r.block_count,
+      ai: parseJson(r.ai_json), palette: parseJson(r.palette_json), blocks: parseJson(r.blocks_json),
+      nbt_base64: r.nbt ? Buffer.from(r.nbt).toString("base64") : null,
+      duration_ms: r.duration_ms == null ? null : Number(r.duration_ms), created_at: Number(r.created_at),
+    }) + "\n");
+  }
+  await new Promise((resolve) => structOut.end(resolve));
+  console.error(`${structures.length} structures → ${outPath}`);
   process.exit(0);
 }
 const [rows] = await conn.execute(

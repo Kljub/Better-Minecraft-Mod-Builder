@@ -93,6 +93,14 @@ const httpServer = http.createServer(async (req, res) => {
       res.on("close", () => { clearTimeout(t); const i = waiters.indexOf(res); if (i >= 0) waiters.splice(i, 1); });
       return;
     }
+    // Another mc-designer instance (a second AI client) relays its tool calls through the one that
+    // owns the port. Only other local processes — browser pages always send an Origin.
+    if (req.method === "POST" && url.pathname === "/call") {
+      if (req.headers.origin) return send(res, 403, { error: "not for browsers" });
+      const { tool, args } = JSON.parse(await readBody(req));
+      try { return send(res, 200, { ok: true, result: await callEditor(tool, args) }); }
+      catch (err) { return send(res, 200, { ok: false, error: String(err?.message || err) }); }
+    }
     if (req.method === "POST" && url.pathname === "/result") {
       lastSeen = Date.now();
       const msg = JSON.parse(await readBody(req));
@@ -111,14 +119,57 @@ const httpServer = http.createServer(async (req, res) => {
   }
 });
 
-httpServer.on("error", (err) => log(`bridge failed on 127.0.0.1:${PORT}: ${err.message}`));
-httpServer.listen(PORT, "127.0.0.1", () => log(`bridge listening on http://127.0.0.1:${PORT}`));
+/**
+ * Port owner = the bridge the editor talks to. When another mc-designer instance already owns the
+ * port (two AI clients, e.g. Claude Code and Codex), this one relays its calls through it instead
+ * of failing, and takes the port over once that instance exits.
+ */
+let relay = false;
+let listening = false;
+function listen() {
+  httpServer.listen(PORT, "127.0.0.1");
+}
+httpServer.on("listening", () => { listening = true; relay = false; log(`bridge listening on http://127.0.0.1:${PORT}`); });
+httpServer.on("error", async (err) => {
+  if (err.code === "EADDRINUSE") {
+    const owner = await fetch(`http://127.0.0.1:${PORT}/ping`).then((r) => r.json()).catch(() => null);
+    if (owner?.name === "mc-designer-mcp") {
+      relay = true;
+      log(`another mc-designer bridge owns 127.0.0.1:${PORT} — relaying tool calls through it`);
+      return;
+    }
+  }
+  log(`bridge failed on 127.0.0.1:${PORT}: ${err.message}`);
+});
+listen();
+
+async function relayCall(tool, args) {
+  const limit = (LONG_TOOLS[tool] ?? CALL_TIMEOUT_MS) + 5_000;
+  let res;
+  try {
+    res = await fetch(`http://127.0.0.1:${PORT}/call`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tool, args: args ?? {} }), signal: AbortSignal.timeout(limit),
+    });
+  } catch (err) {
+    if (err?.name === "TimeoutError") throw new Error(`Editor didn't answer "${tool}" in time.`);
+    // The owner is gone: take the port over and wait for the editor to reconnect (it retries within ~10 s).
+    if (!listening) listen();
+    for (let waited = 0; waited < 15_000 && !(listening && connected()); waited += 250) await new Promise((r) => setTimeout(r, 250));
+    if (relay) throw new Error(`The bridge on 127.0.0.1:${PORT} isn't reachable: ${err?.message || err}`);
+    return callEditor(tool, args);
+  }
+  const msg = await res.json();
+  if (!msg.ok) throw new Error(msg.error || "editor reported an error");
+  return msg.result;
+}
 
 /** Runs a tool in the editor tab and resolves with its result. */
 /** Tools that take longer than CALL_TIMEOUT_MS in the editor (image generation runs ~40 s per image). */
 const LONG_TOOLS = { generate_image: 300_000, generate_item_skin: 300_000, generate_gui_texture: 300_000 };
 
 function callEditor(tool, args) {
+  if (relay) return relayCall(tool, args);
   if (!connected()) {
     return Promise.reject(new Error(
       "The MC Screen Designer editor isn't connected. Open the project in the browser and switch on \"AI bridge\" in the editor's status bar (bottom right).",

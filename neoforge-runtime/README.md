@@ -30,6 +30,15 @@ into a real, working `Screen` — no codegen, no hand-laid-out widgets.
 
 ## Installation
 
+**No Java needed:** the designer's **Build Mod** button (editor header) writes the whole project
+into one `<modid>-<version>.jar` for the `mods` folder: a `neoforge.mods.toml` for your mod id
+(no entrypoint class — this runtime registers the content for every mod id it finds specs for),
+all assets/data, and this runtime nested via Jar-in-Jar (`META-INF/jarjar`) when the designer's
+server has its jar built for the project's Minecraft version (`./gradlew jar`). Without it, players
+install the ScreenSpec mod next to yours.
+
+To use the runtime from your own Java mod instead:
+
 Grab the jar from [GitHub Releases](https://github.com/SheepFromHeaven/minecraft-mod-ui-builder/releases)
 and add it to your mod's `build.gradle`:
 

@@ -16,6 +16,16 @@ export async function withLinkedAccount<T>(
   fn: (account: RunAccount | undefined, onQuota: (q: Quota) => void) => Promise<T>,
 ): Promise<T> {
   const user = await currentUser(request).catch(() => null);
+  return withUserAccount(user?.id ?? null, provider, fn);
+}
+
+/** Same, for a user known some other way (e.g. the companion mod's bearer token). */
+export async function withUserAccount<T>(
+  userId: number | null,
+  provider: AiProvider,
+  fn: (account: RunAccount | undefined, onQuota: (q: Quota) => void) => Promise<T>,
+): Promise<T> {
+  const user = userId == null ? null : { id: userId };
   const queue = user ? await accountQueue(user.id, provider) : [];
   if (!user || !queue.length) return fn(undefined, () => {});
 

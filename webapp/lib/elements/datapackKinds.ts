@@ -1,5 +1,5 @@
 import { HeartCrack, WandSparkles, Flag, Frame, SquareFunction, Pickaxe } from "lucide-react";
-import type { ElementKindDef } from "./types";
+import type { ElementKindDef, ElementSpec, VersionContext } from "./types";
 import { json, str, num, bool, list, opts, titleCase, nameOf, textureFile, tagIf } from "./helpers";
 import { attributeId, type McVersion } from "@/lib/mcVersion";
 
@@ -101,6 +101,50 @@ export function enchantableTag(group: string, version: McVersion): string {
   const only = ENCHANTABLE_ONLY[group];
   return only && only !== version && ENCHANTABLE_EQUIVALENT[group] ? ENCHANTABLE_EQUIVALENT[group] : group;
 }
+/** #minecraft:exclusive_set/* tags (same in 1.21.1 and 26.2). */
+const EXCLUSIVE_SETS: Record<string, string> = {
+  armor: "Protection enchantments", damage: "Sharpness/Smite/…", boots: "Frost Walker/Depth Strider", bow: "Infinity/Mending",
+  crossbow: "Multishot/Piercing", mining: "Fortune/Silk Touch", riptide: "Riptide/Loyalty/Channeling",
+};
+/** Enchantments in both 1.21.1 and 26.2 (an unknown id in a tag fails the whole datapack). */
+const VANILLA_ENCHANTMENTS = [
+  "aqua_affinity", "bane_of_arthropods", "binding_curse", "blast_protection", "breach", "channeling", "density",
+  "depth_strider", "efficiency", "feather_falling", "fire_aspect", "fire_protection", "flame", "fortune", "frost_walker",
+  "impaling", "infinity", "knockback", "looting", "loyalty", "luck_of_the_sea", "lure", "mending", "multishot",
+  "piercing", "power", "projectile_protection", "protection", "punch", "quick_charge", "respiration", "riptide",
+  "sharpness", "silk_touch", "smite", "soul_speed", "sweeping_edge", "swift_sneak", "thorns", "unbreaking",
+  "vanishing_curse", "wind_burst",
+];
+/**
+ * "Incompatible with" values — a list, or a single string from before it was a multiselect —
+ * always namespaced: Minecraft reads a bare "dungeon_slayer" as minecraft:dungeon_slayer, which
+ * doesn't exist and fails the whole datapack. Bare ids (imports, AI edits) get minecraft: when
+ * vanilla has them, else the mod's own namespace.
+ */
+export function exclusiveValues(spec: ElementSpec, modId: string): string[] {
+  const v = spec.exclusiveSet;
+  const raw = Array.isArray(v) ? v.map((x) => String(x).trim()) : typeof v === "string" ? [v.trim()] : [];
+  return [...new Set(raw.filter(Boolean).map((x) => qualifyExclusive(x, modId)))];
+}
+function qualifyExclusive(value: string, modId: string): string {
+  const tag = value.startsWith("#");
+  const id = tag ? value.slice(1) : value;
+  if (id.includes(":")) return value;
+  const vanilla = tag ? id.startsWith("exclusive_set/") && id.slice("exclusive_set/".length) in EXCLUSIVE_SETS : VANILLA_ENCHANTMENTS.includes(id);
+  return `${tag ? "#" : ""}${vanilla ? "minecraft" : modId}:${id}`;
+}
+/** Own-mod enchantments that no longer exist (an unknown id fails the whole datapack). */
+function missingCustom(values: string[], { modId, elementIds }: VersionContext): string[] {
+  if (!elementIds) return [];
+  const own = new Set(elementIds.enchantment ?? []);
+  return values.filter((v) => v.startsWith(`${modId}:`) && !own.has(v));
+}
+const exportedExclusive = (spec: ElementSpec, ctx: VersionContext) => {
+  const missing = missingCustom(exclusiveValues(spec, ctx.modId), ctx);
+  return exclusiveValues(spec, ctx.modId).filter((v) => !missing.includes(v));
+};
+/** Several values go into the mod's own enchantment tag (a tag may list ids and other tags). */
+const exclusiveTag = (modId: string, id: string) => `#${modId}:exclusive_set/${id}`;
 const ATTRIBUTES = [
   "max_health", "movement_speed", "attack_damage", "attack_speed", "attack_knockback", "armor", "armor_toughness",
   "knockback_resistance", "luck", "mining_efficiency", "block_break_speed", "sneaking_speed", "step_height", "jump_strength",
@@ -130,7 +174,7 @@ export const ENCHANTMENT: ElementKindDef = {
     maxCostBase: 55, maxCostPerLevel: 10,
     supportedItems: "sharp_weapon",
     slots: ["mainhand"],
-    exclusiveSet: "",
+    exclusiveSet: [],
     treasure: false,
     tradeable: true,
     onRandomLoot: true,
@@ -152,11 +196,16 @@ export const ENCHANTMENT: ElementKindDef = {
     { key: "maxCostBase", label: "Max enchanting cost (level I)", type: "number", min: 0, integer: true, half: true },
     { key: "maxCostPerLevel", label: "… per extra level", type: "number", min: 0, integer: true, half: true },
     {
-      key: "exclusiveSet", label: "Incompatible with", type: "select",
-      options: [{ value: "", label: "Nothing" }, ...opts(["armor", "damage", "boots", "bow", "crossbow", "mining", "riptide"], {
-        armor: "Protection enchantments", damage: "Sharpness/Smite/…", boots: "Frost Walker/Depth Strider", bow: "Infinity/Mending",
-        crossbow: "Multishot/Piercing", mining: "Fortune/Silk Touch", riptide: "Riptide/Loyalty/Channeling",
-      }).map((o) => ({ ...o, value: `#minecraft:exclusive_set/${o.value}` }))],
+      key: "exclusiveSet", label: "Incompatible with", type: "multiselect", compact: true,
+      help: "Pick any number of groups, vanilla and custom enchantments. Incompatibility works both ways — the other enchantment needs no change.",
+      options: [
+        ...opts(Object.keys(EXCLUSIVE_SETS), EXCLUSIVE_SETS).map((o) => ({ ...o, value: `#minecraft:exclusive_set/${o.value}`, group: "Vanilla groups" })),
+        ...VANILLA_ENCHANTMENTS.map((e) => ({ value: `minecraft:${e}`, label: titleCase(e), group: "Vanilla enchantments" })),
+      ],
+      moreOptions: (ctx, spec) => (ctx.elementIds?.enchantment ?? [])
+        .filter((id) => id !== `${ctx.modId}:${spec.id}`)
+        .map((id) => ({ value: id, label: titleCase(id.slice(id.indexOf(":") + 1)), group: "Custom enchantments" })),
+      normalize: (values, ctx) => exclusiveValues({ id: "", exclusiveSet: values }, ctx.modId),
     },
     { key: "treasure", label: "Treasure (not in the enchanting table)", type: "boolean", half: true },
     { key: "curse", label: "Curse", type: "boolean", half: true },
@@ -174,7 +223,8 @@ export const ENCHANTMENT: ElementKindDef = {
       ],
     },
   ],
-  validate: (spec, { mcVersion }) => {
+  validate: (spec, ctx) => {
+    const { mcVersion } = ctx;
     const problems: string[] = [];
     const group = str(spec, "supportedItems");
     if (ENCHANTABLE_ONLY[group] && ENCHANTABLE_ONLY[group] !== mcVersion && !ENCHANTABLE_EQUIVALENT[group]) {
@@ -182,9 +232,11 @@ export const ENCHANTMENT: ElementKindDef = {
     }
     if (list(spec, "slots").length === 0) problems.push("Pick at least one slot, or the enchantment never takes effect.");
     if (list(spec, "effects").length === 0) problems.push("No effects — the enchantment would do nothing.");
+    for (const id of missingCustom(exclusiveValues(spec, ctx.modId), ctx)) problems.push(`"Incompatible with" lists ${id}, which no longer exists — it is left out of the export.`);
     return problems;
   },
-  files: (spec, { modId, mcVersion }) => {
+  files: (spec, ctx) => {
+    const { modId, mcVersion } = ctx;
     const effects: Record<string, unknown[]> = {};
     const add = (component: string, entry: unknown) => { (effects[component] ??= []).push(entry); };
     list<Record<string, unknown>>(spec, "effects").forEach((e, i) => {
@@ -208,12 +260,13 @@ export const ENCHANTMENT: ElementKindDef = {
         case "mob_experience": add("minecraft:mob_experience", { effect: { type: "minecraft:add", value } }); break;
       }
     });
+    const exclusive = exportedExclusive(spec, ctx);
     const supported = `#minecraft:enchantable/${enchantableTag(str(spec, "supportedItems", "sharp_weapon"), mcVersion)}`;
     const body: Record<string, unknown> = {
       anvil_cost: num(spec, "anvilCost", 1),
       description: { translate: `enchantment.${modId}.${spec.id}` },
       effects,
-      ...(str(spec, "exclusiveSet") ? { exclusive_set: str(spec, "exclusiveSet") } : {}),
+      ...(exclusive.length ? { exclusive_set: exclusive.length === 1 ? exclusive[0] : exclusiveTag(modId, spec.id) } : {}),
       max_cost: { base: num(spec, "maxCostBase", 50), per_level_above_first: num(spec, "maxCostPerLevel", 10) },
       max_level: Math.max(1, Math.round(num(spec, "maxLevel", 1))),
       min_cost: { base: num(spec, "minCostBase", 1), per_level_above_first: num(spec, "minCostPerLevel", 10) },
@@ -224,7 +277,8 @@ export const ENCHANTMENT: ElementKindDef = {
     };
     return [{ path: `data/${modId}/enchantment/${spec.id}.json`, content: json(body) }];
   },
-  shared: (spec, { modId }) => {
+  shared: (spec, ctx) => {
+    const { modId } = ctx;
     const id = `${modId}:${spec.id}`;
     const tag = (name: string) => `data/minecraft/tags/enchantment/${name}.json`;
     const tags: Record<string, string[]> = { [tag(bool(spec, "treasure") ? "treasure" : "non_treasure")]: [id] };
@@ -232,6 +286,8 @@ export const ENCHANTMENT: ElementKindDef = {
     if (bool(spec, "treasure") && bool(spec, "tradeable")) tags[tag("tradeable")] = [id];
     if (bool(spec, "treasure") && bool(spec, "onRandomLoot")) tags[tag("on_random_loot")] = [id];
     if (bool(spec, "curse")) tags[tag("curse")] = [id];
+    const exclusive = exportedExclusive(spec, ctx);
+    if (exclusive.length > 1) tags[`data/${modId}/tags/enchantment/exclusive_set/${spec.id}.json`] = exclusive;
     return { lang: { [`enchantment.${modId}.${spec.id}`]: nameOf(spec) }, tags };
   },
 };
