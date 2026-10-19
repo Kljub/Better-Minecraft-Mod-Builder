@@ -75,6 +75,33 @@ function blockModelJson(modId: string, block: BlockSpec): string {
   );
 }
 
+/**
+ * A chest block (BlockSpec.model "chest"), the way vanilla's chest is built: the block model only
+ * carries the break particle (the chest itself is drawn by the block entity renderer from the
+ * skin), the item is a "minecraft:chest" special model. The skin goes to
+ * textures/entity/chest/<id>.png — the chests atlas picks up that folder from every namespace —
+ * and once more under textures/block/ for the particle.
+ */
+export function writeChestBlockFiles(zip: JSZip, prefix: string, modId: string, block: BlockSpec, allTextures: Record<string, Blob>) {
+  const skin = block.texture ? allTextures[`pack:${block.texture}`] : undefined;
+  if (skin) {
+    zip.file(`${prefix}assets/${modId}/textures/entity/chest/${block.id}.png`, skin);
+    zip.file(`${prefix}assets/${modId}/textures/block/${block.id}_chest.png`, skin);
+  }
+  const particle = skin ? `${modId}:block/${block.id}_chest` : "minecraft:block/oak_planks";
+  zip.file(`${prefix}assets/${modId}/blockstates/${block.id}.json`, blockstateJson(modId, block));
+  zip.file(`${prefix}assets/${modId}/models/block/${block.id}.json`, JSON.stringify({ textures: { particle } }, null, 2));
+  if (!block.hasItem) return;
+  zip.file(`${prefix}assets/${modId}/models/item/${block.id}.json`, JSON.stringify({ parent: "minecraft:item/template_chest", textures: { particle } }, null, 2));
+  zip.file(`${prefix}assets/${modId}/items/${block.id}.json`, JSON.stringify({
+    model: {
+      type: "minecraft:special",
+      base: `${modId}:item/${block.id}`,
+      model: { type: "minecraft:chest", texture: `${modId}:${block.id}` },
+    },
+  }, null, 2));
+}
+
 function blockItemModelJson(modId: string, block: BlockSpec): string {
   return JSON.stringify({ parent: `${modId}:block/${block.id}` }, null, 2);
 }
@@ -413,7 +440,7 @@ interface ResolvedInput {
   mcVersion: McVersion;
 }
 
-function resolveInput(input: ExportBundleInput): ResolvedInput {
+export function resolveInput(input: ExportBundleInput): ResolvedInput {
   return {
     screens: input.screens ?? [], items: input.items ?? [], blocks: input.blocks ?? [],
     creativeTabs: input.creativeTabs ?? [], customAttributes: input.customAttributes ?? [],
@@ -426,7 +453,7 @@ function resolveInput(input: ExportBundleInput): ResolvedInput {
 }
 
 function hasAnyGeneratedContent(r: ResolvedInput): boolean {
-  return r.items.length > 0 || r.blocks.length > 0 || r.customAttributes.length > 0 || r.effects.length > 0 ||
+  return r.items.length > 0 || r.blocks.length > 0 || r.creativeTabs.length > 0 || r.customAttributes.length > 0 || r.effects.length > 0 ||
     r.potions.length > 0 || r.achievements.length > 0 || r.recipes.length > 0 || r.trades.length > 0 ||
     r.lootEntries.length > 0 || r.biomes.length > 0 || r.dimensions.length > 0 || r.armors.length > 0 ||
     hasElements(r.elements);
@@ -437,10 +464,12 @@ function collectAllSrcs(r: ResolvedInput): Set<string> {
   for (const s of r.screens) for (const src of collectSpriteSrcs(s.widgets)) srcs.add(src);
   for (const it of r.items) if (it.texture) srcs.add(it.texture);
   for (const b of r.blocks) {
+    // A chest skin is copied by writeChestBlockFiles; still listed so the textures get loaded.
     if (b.texture) srcs.add(b.texture);
     if (b.faceTextures) for (const t of Object.values(b.faceTextures)) if (t) srcs.add(t);
   }
   for (const a of r.achievements) if (!a.parentId && a.background) srcs.add(a.background);
+  for (const t of r.creativeTabs) if (t.icon) srcs.add(t.icon);
   for (const e of r.effects) if (e.icon) srcs.add(e.icon);
   for (const a of r.armors) {
     if (a.iconHelmet) srcs.add(a.iconHelmet);
@@ -492,7 +521,7 @@ function resolveDimensionBiomeOverride(modId: string, d: DimensionSpec, biomes: 
  * real files one level down rather than duplicating this generation logic. Returns how many
  * textures got bundled (used by the caller to decide whether a zip is even worth producing).
  */
-function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: ResolvedInput, allTextures: Record<string, Blob>): number {
+export function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: ResolvedInput, allTextures: Record<string, Blob>): number {
   let bundled = 0;
   for (const src of collectAllSrcs(r)) {
     const blob = allTextures[`pack:${src}`];
@@ -522,12 +551,31 @@ function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r: Resol
     }
   }
   for (const block of r.blocks) {
+    if (block.model === "chest") {
+      writeChestBlockFiles(zip, prefix, modId, block, allTextures);
+      continue;
+    }
     zip.file(`${prefix}assets/${modId}/blockstates/${block.id}.json`, blockstateJson(modId, block));
     zip.file(`${prefix}assets/${modId}/models/block/${block.id}.json`, blockModelJson(modId, block));
     if (block.hasItem) {
       zip.file(`${prefix}assets/${modId}/models/item/${block.id}.json`, blockItemModelJson(modId, block));
       zip.file(`${prefix}assets/${modId}/items/${block.id}.json`, itemDefinitionJson(`${modId}:item/${block.id}`));
     }
+  }
+  // Project creative tabs: titles, and an icon image as a hidden item "<tab>_tab_icon" (a tab's
+  // icon is an item stack; this one is in no tab, so players only see it as the icon).
+  if (r.creativeTabs.length > 0) {
+    const tabs = r.creativeTabs.map((t) => {
+      const blob = t.icon ? allTextures[`pack:${t.icon}`] : undefined;
+      if (blob) {
+        const iconId = `${t.id}_tab_icon`;
+        zip.file(`${prefix}assets/${modId}/textures/item/${iconId}.png`, blob);
+        zip.file(`${prefix}assets/${modId}/models/item/${iconId}.json`, JSON.stringify({ parent: "item/generated", textures: { layer0: `${modId}:item/${iconId}` } }, null, 2));
+        zip.file(`${prefix}assets/${modId}/items/${iconId}.json`, itemDefinitionJson(`${modId}:item/${iconId}`));
+      }
+      return { id: t.id, displayName: t.displayName, icon: !!blob };
+    });
+    zip.file(`${prefix}assets/${modId}/screenspec/creative_tabs.json`, JSON.stringify(tabs, null, 2));
   }
   if (r.items.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/items.json`, JSON.stringify(r.items, null, 2));
   if (r.blocks.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/blocks.json`, JSON.stringify(r.blocks, null, 2));

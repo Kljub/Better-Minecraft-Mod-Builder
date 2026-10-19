@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import TexturePickerModal from "@/components/TexturePickerModal";
+import { blockEntityModel } from "@/lib/model3d/blockImport";
+import { isChestSkinKey } from "@/lib/chestModel";
 import { NumInput, TextureField, Toggle } from "@/components/SchemaFields";
 import { FieldGrid } from "@/components/ElementEditor";
 import ModelViewport, { type GizmoMode, type ModelViewportHandle, type Selection, type TransformResult, type ViewPreset } from "./ModelViewport";
@@ -132,6 +134,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
   const { packTextures, uploadCustomTexture } = useTextures();
   const [tab, setTab] = useState<Tab>("design");
   const [vanillaOpen, setVanillaOpen] = useState(false);
+  const [blockPicker, setBlockPicker] = useState(false);
   const [selection, setSelection] = useState<Selection>(null);
   const [mode, setMode] = useState<GizmoMode>("translate");
   const [snap, setSnap] = useState(1);
@@ -204,7 +207,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
     const round = (v: Vec3, step: number): Vec3 => v.map((x) => Math.round(x / step) * step + 0) as Vec3;
     if (result.kind === "rotate") keyAtPlayhead(bone.id, "rotation", round([result.rotation[0] - bone.rotation[0], result.rotation[1] - bone.rotation[1], result.rotation[2] - bone.rotation[2]], 0.01));
     else if (result.kind === "translate") { const c = currentValue(bone.id, "position"); keyAtPlayhead(bone.id, "position", round([c[0] + result.delta[0], c[1] + result.delta[1], c[2] + result.delta[2]], snap || 0.01)); }
-    else { const c = currentValue(bone.id, "scale"); keyAtPlayhead(bone.id, "scale", round([c[0] * result.scale[0], c[1] * result.scale[1], c[2] * result.scale[2]], 0.01)); }
+    else if (result.kind === "scale") { const c = currentValue(bone.id, "scale"); keyAtPlayhead(bone.id, "scale", round([c[0] * result.scale[0], c[1] * result.scale[1], c[2] * result.scale[2]], 0.01)); }
   };
 
   // Controls for the AI bridge (screenshots, views, tabs, posing at an animation time).
@@ -255,6 +258,15 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
       const bone = model.cubes.find((c) => c.id === s.id)?.bone;
       setSelection(bone ? { type: "bone", id: bone } : null);
     } else setSelection(s);
+  };
+  // In the viewport a click on a part opens its rotation gizmo, a double-click the resize handles.
+  const clickSelect = (s: Selection) => {
+    select(s);
+    if (s) setMode("rotate");
+  };
+  const doubleSelect = (s: NonNullable<Selection>) => {
+    select(s);
+    setMode("scale");
   };
 
   // ── context menus ──
@@ -362,6 +374,28 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
     return true;
   };
 
+  /** Starts the model from a block: its texture, as a full block — or the vanilla chest for a chest skin. */
+  const importBlock = (key: string) => {
+    setBlockPicker(false);
+    const url = packTextures[key];
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const width = img.naturalWidth || 16, height = img.naturalHeight || 16;
+      const chest = isChestSkinKey(key) || (key.startsWith("custom/") && width === 64 && height === 64);
+      const hasContent = model.cubes.length > 0 && !(model.cubes.length === 1 && model.bones.length === 1);
+      if (hasContent && !window.confirm("Replace the current model with the block?")) return;
+      commit({ ...blockEntityModel(key, { width, height }, chest), animations: [] });
+      setSelection(null);
+      setAnimId(null);
+      viewport.current?.setView("perspective");
+      toast.success(chest ? "Imported the chest: bottom, lid and lock, with its skin." : `Imported the block with ${key.replace(/^.*\//, "")}.`);
+    };
+    img.onerror = () => toast.error("Couldn't load that texture.");
+    img.src = url;
+  };
+
   const importVanilla = async (mob: VanillaMob) => {
     const { geometry, texture } = await loadVanillaMob(mob);
     return applyImported(fromBedrockGeo(geometry), texture, `${mob.id}.png`, vanillaLabel(mob.id));
@@ -460,6 +494,11 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
           <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => importRef.current?.click()} title="Import .bbmodel, Bedrock/GeckoLib .geo.json or .animation.json">
             <Upload className="h-3.5 w-3.5" /> Import
           </Button>
+          {variant === "entity" && (
+            <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setBlockPicker(true)} title="Start from a block: pick its texture — a chest skin (entity/chest/…) gives the vanilla chest with lid">
+              <Box className="h-3.5 w-3.5" /> Block
+            </Button>
+          )}
           {variant === "entity" && (
             <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => setVanillaOpen(true)} title="Start from a vanilla Minecraft mob (zombie, iron golem, …)">
               <Boxes className="h-3.5 w-3.5" /> From Minecraft
@@ -569,7 +608,9 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
                 mode={sel?.type === "bone" && mode === "scale" && tab === "design" ? "translate" : mode}
                 snap={snap}
                 rotationSnap={rotationSnap}
-                onSelect={select}
+                onSelect={clickSelect}
+                onDoubleSelect={doubleSelect}
+                resizeHandles={tab === "design"}
                 onTransformEnd={onTransformEnd}
                 onContextMenu={openMenu}
                 reference={variant === "armor" ? "player" : undefined}
@@ -748,6 +789,7 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
                     if (!url) { commit({ ...model, texture: k }); return; }
                     // Adopt the image's real size so UVs line up.
                     const img = new Image();
+                    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
                     img.onload = () => commit({ ...model, texture: k, textureWidth: img.naturalWidth || model.textureWidth, textureHeight: img.naturalHeight || model.textureHeight });
                     img.onerror = () => commit({ ...model, texture: k });
                     img.src = url;
@@ -782,6 +824,8 @@ export default function ModelEditor({ id, model, modId, mcVersion, onChange, set
 
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
       <VanillaMobDialog open={vanillaOpen} onOpenChange={setVanillaOpen} onPick={importVanilla} />
+      <TexturePickerModal open={blockPicker} packTextures={packTextures} current="" onSelect={importBlock}
+        onClose={() => setBlockPicker(false)} onUpload={uploadCustomTexture} />
     </div>
   );
 }

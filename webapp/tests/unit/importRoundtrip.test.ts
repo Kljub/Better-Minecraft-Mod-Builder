@@ -90,7 +90,7 @@ describe("project export folders", () => {
     const project = { screens: [], items: [], elementFolders: { entityModel: ["Bosses", "  ", 3], "@items": ["Weapons"] } };
     const zip = new JSZip();
     zip.file("myproj/myproj.json", JSON.stringify(project));
-    const blob = new Blob([await zip.generateAsync({ type: "uint8array" })]);
+    const blob = new Blob([await zip.generateAsync({ type: "arraybuffer" })]);
     expect(await readProjectFolders(blob)).toEqual({ entityModel: ["Bosses"], "@items": ["Weapons"] });
     expect(await readProjectFolders(new Blob([JSON.stringify(project)]))).toEqual({ entityModel: ["Bosses"], "@items": ["Weapons"] });
     expect(await readProjectFolders(new Blob([JSON.stringify({ screens: [] })]))).toEqual({});

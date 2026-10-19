@@ -8,6 +8,7 @@ import { genId } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { aiClientLabel, enabledAiClients, setAiPreferred, useAiSettings, type AiClientId } from "@/lib/aiSettings";
 import { clearAgentRun, startAgentRun, stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
+import { TOOL_LABELS } from "@/lib/ai/toolLabels";
 import { parseReferenceModel, type ReferenceModel } from "@/lib/model3d/referenceModel";
 import { buildMeshReference, defaultOrientation, loadMeshFile, meshBoxes, meshExtension, meshModelId, prepareStl, MESH_EXTENSIONS, STL_MAX_POLYGONS, type MeshOrientation, type MeshReference } from "@/lib/model3d/meshReference";
 
@@ -36,17 +37,6 @@ const EXAMPLES = [
   "Stone golem with a humanoid rig, grey with moss, slow but hits hard, 40 health, hostile",
 ];
 
-/** Tool names the agent calls (mcp/server.mjs) → what the user sees in the log. */
-const TOOL_LABELS: Record<string, string> = {
-  get_guide: "Reading the modeling guide", hold_item: "Putting the item in its hand", get_status: "Checking the editor", create_model: "Creating the model",
-  add_bones: "Adding bones", add_cubes: "Adding cubes", edit_element: "Adjusting parts", move_bone: "Moving a bone",
-  mirror_element: "Mirroring parts", delete_elements: "Removing parts", pack_uv: "Packing the texture layout",
-  paint_cubes: "Painting", paint_texture: "Painting the texture", paint_face: "Painting details",
-  create_animation: "Creating an animation", add_keyframes: "Animating", generate_animation: "Generating an animation",
-  set_entity_settings: "Setting mob stats", screenshot: "Looking at the result", set_view: "Turning the camera",
-  open_element: "Opening the model", get_model: "Inspecting the model", update_element: "Updating", create_element: "Creating an element",
-};
-
 /**
  * Entity Model Generator tab: describe a mob in words; Claude Code or Codex (Settings → AI) then
  * builds it live in the editor through the project's MCP tools — model, texture, animations and
@@ -60,7 +50,10 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
   runEditorTool?: (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 }) {
   const settings = useAiSettings();
-  const run = useAgentRun();
+  const agent = useAgentRun();
+  // A Codex Chat run (editor header) isn't this tab's — don't show its log here, just stay disabled.
+  const chatBusy = agent.running && agent.mode === "chat";
+  const run = agent.mode === "chat" ? { ...agent, running: false, port: null, log: [], result: null } : agent;
   const [prompt, setPrompt] = useState("");
   const [images, setImages] = useState<RefImage[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -159,7 +152,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [run.log.length]);
 
   const start = () => {
-    if (!provider || provider === "ollama" || (!prompt.trim() && !hasReference) || meshBusy) return;
+    if (!provider || provider === "ollama" || chatBusy || (!prompt.trim() && !hasReference) || meshBusy) return;
     const reference = mesh ? { name: mesh.ref.name, summary: mesh.ref.summary, kind: "mesh" }
       : refModel ? { name: refModel.name, summary: refModel.summary } : null;
     const sent = [
@@ -345,7 +338,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
                   <Square className="h-3.5 w-3.5" /> Stop
                 </Button>
               ) : (
-                <Button size="sm" className="h-8 gap-1.5" disabled={(!prompt.trim() && !hasReference) || meshBusy} onClick={start}>
+                <Button size="sm" className="h-8 gap-1.5" disabled={(!prompt.trim() && !hasReference) || meshBusy || chatBusy} title={chatBusy ? "Codex Chat is working — wait until it's done" : undefined} onClick={start}>
                   <Play className="h-3.5 w-3.5" /> Generate with {provider ? aiClientLabel(provider) : "AI"}
                 </Button>
               )}

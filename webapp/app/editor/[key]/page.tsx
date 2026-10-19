@@ -47,9 +47,12 @@ import { defaultEntitySettings } from "@/lib/elements/entitySettings";
 import { followLabelId, withLabelId } from "@/lib/elements/helpers";
 import { setBridgeEnabled, useBridgeEnabled, useMcpBridge } from "@/lib/ai/mcpBridge";
 import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
-import { forgetKey, renameAssignedKey } from "@/lib/resourceFolders";
+import { folderOfKey, forgetKey, moveToFolder, renameAssignedKey } from "@/lib/resourceFolders";
 import EntityModelGeneratorPanel from "@/components/EntityModelGeneratorPanel";
+import CodexChatPanel from "@/components/CodexChatPanel";
+import { MessageSquare } from "lucide-react";
 import { runTool, type EditorApi } from "@/lib/ai/editorTools";
+import { BUILTIN_COLLECTIONS } from "@/lib/ai/builtinCollections";
 import type { EntityModel } from "@/lib/model3d/types";
 import { ELEMENT_KINDS, getElementKind, normalizeElements, normalizeElement, elementLabel } from "@/lib/elements/registry";
 import type { ElementsByKind, ElementSpec } from "@/lib/elements/types";
@@ -91,6 +94,10 @@ import { readSpecBundle, readProjectScreens, readProjectFolders, readScreenExpor
 import { detectImport } from "@/lib/importDetect";
 import { saveTexture, loadAllTextures } from "@/lib/textureStore";
 import { toast } from "sonner";
+import { readStructure } from "@/lib/nbt";
+import { chatProviderLabel, useChatProvider } from "@/lib/ai/chatStore";
+import { saveStructureFile } from "@/lib/structureStore";
+import { recordId } from "@/lib/ai/builtinCollections";
 import { genId, copyToClipboard } from "@/lib/utils";
 
 function newId(type: string, existing: WidgetSpec[]): string {
@@ -420,7 +427,7 @@ export default function EditorPage() {
   const router = useRouter();
   const projectKey = params.key;
 
-  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture, reload: reloadTextures } = useTextures();
+  const { reset, extractPack, initialized, ready, setupRequired, packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture, duplicateCustomTexture, reload: reloadTextures } = useTextures();
   const [showTextureDebug, setShowTextureDebug] = useState(false);
   const [railSettingsOpen, setRailSettingsOpen] = useState(false);
   const [projectLoaded, setProjectLoaded] = useState(false);
@@ -1029,6 +1036,11 @@ export default function EditorPage() {
 
   const renameCreativeTab = useCallback((idx: number, displayName: string) => {
     commit({ ...entry, creativeTabs: creativeTabs.map((t, i) => i === idx ? { ...t, displayName } : t) });
+  }, [entry, creativeTabs, commit]);
+
+  const [tabIconFor, setTabIconFor] = useState<number | null>(null);
+  const setCreativeTabIcon = useCallback((idx: number, icon: string) => {
+    commit({ ...entry, creativeTabs: creativeTabs.map((t, i) => i === idx ? { ...t, icon } : t) });
   }, [entry, creativeTabs, commit]);
 
   const removeCreativeTab = useCallback((idx: number) => {
@@ -2013,6 +2025,16 @@ export default function EditorPage() {
             if (!next || !next.trim() || next.trim() === current) return;
             renameAssignedKey(k, await renameCustomTexture(k, next.trim()));
           },
+          onDuplicate: async () => {
+            try {
+              const copy = await duplicateCustomTexture(k);
+              const folder = folderOfKey(k);
+              if (folder) moveToFolder([copy], folder);
+              toast.success(`Duplicated as “${copy.replace(/^custom\//, "").replace(/\.[^./]+$/, "")}”.`);
+            } catch (err) {
+              toast.error(`Could not duplicate: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          },
           onDelete: async () => {
             const name = k.replace(/^custom\//, "").replace(/\.[^./]+$/, "");
             if (!window.confirm(`Delete “${name}”? Items or blocks using it will lose their texture.`)) return;
@@ -2117,7 +2139,11 @@ export default function EditorPage() {
       case "items": return withFolders("items", build({ list: items, docType: "item", activeAt: activeItemIdx, open: switchItem, add: addItem, rename: renameItem, remove: removeItem, duplicate: duplicateItem, exportOne: handleExportItem, exportAll: handleExportAllItems, importCategory: "items", thumb: (it) => tex(it.texture) }));
       case "blocks": return withFolders("blocks", build({ list: blocks, docType: "block", activeAt: activeBlockIdx, open: switchBlock, add: addBlock, rename: renameBlock, remove: removeBlock, duplicate: duplicateBlock, exportOne: handleExportBlock, exportAll: handleExportAllBlocks, importCategory: "blocks", thumb: (b) => tex(b.texture) }));
       case "armors": return withFolders("armors", build({ list: armors, docType: "armor", activeAt: activeArmorIdx, open: switchArmor, add: addArmor, rename: renameArmor, remove: removeArmor, duplicate: duplicateArmor, exportOne: handleExportArmor, exportAll: handleExportAllArmors, importCategory: "armors", thumb: (a) => tex(a.iconChestplate) }));
-      case "creativeTabs": return withFolders("creativeTabs", build({ list: creativeTabs, add: addCreativeTab, rename: renameCreativeTab, renameDisplayName: true, remove: removeCreativeTab }));
+      case "creativeTabs": {
+        // A click on a tab picks its icon image (tabs have no editor of their own).
+        const view = withFolders("creativeTabs", build({ list: creativeTabs, add: addCreativeTab, rename: renameCreativeTab, renameDisplayName: true, remove: removeCreativeTab, thumb: (t) => tex(t.icon ?? "") }));
+        return { ...view, emptyHint: "No creative tabs yet — click a tab to give it an icon image.", entries: view.entries.map((e, i) => ({ ...e, onOpen: () => setTabIconFor(i) })) };
+      }
       case "customAttributes": return withFolders("customAttributes", build({ list: customAttributes, docType: "attribute", activeAt: activeAttributeIdx, open: switchCustomAttribute, add: addCustomAttribute, rename: (i, displayName) => updateCustomAttribute(i, { displayName }), renameDisplayName: true, remove: removeCustomAttribute, duplicate: duplicateCustomAttribute, exportOne: handleExportCustomAttribute, exportAll: handleExportAllCustomAttributes, importCategory: "customAttributes" }));
       case "effects": return withFolders("effects", build({ list: effects, docType: "effect", activeAt: activeEffectIdx, open: switchEffect, add: addEffect, rename: renameEffect, remove: removeEffect, duplicate: duplicateEffect, exportOne: handleExportEffect, exportAll: handleExportAllEffects, importCategory: "effects", thumb: (e) => tex(e.icon) }));
       case "potions": return withFolders("potions", build({ list: potions, docType: "potion", activeAt: activePotionIdx, open: switchPotion, add: addPotion, rename: renamePotion, remove: removePotion, duplicate: duplicatePotion, exportOne: handleExportPotion, exportAll: handleExportAllPotions, importCategory: "potions" }));
@@ -2145,6 +2171,7 @@ export default function EditorPage() {
       ...view,
       folders: elementFolderOps(kind),
       onNew: (folder?: string | null) => { setMainView(null); addElement(kind, folder); },
+      ...(kind === "structure" ? { fileUpload: { label: "Upload .nbt", accept: ".nbt", onFiles: (files: File[], folder?: string | null) => void addStructureFiles(files, folder) } } : {}),
       entries: view.entries.map((e, i) => ({ ...e, label: elementLabel(def, list[i]), sublabel: elementLabel(def, list[i]) !== list[i].id ? list[i].id : undefined })) };
   };
 
@@ -2165,6 +2192,39 @@ export default function EditorPage() {
     const list = elements[kind] ?? [];
     const spec = normalizeElement(def, { id: newSpecId(def.idPrefix, list) });
     setElementList(kind, [...list, folder ? { ...spec, folder } : spec], list.length);
+  }
+
+  /** Structures tab: one new Structure element per uploaded .nbt (named after the file). */
+  async function addStructureFiles(files: File[], folder?: string | null) {
+    const def = getElementKind("structure");
+    if (!def) return;
+    const added: ElementSpec[] = [];
+    const failed: string[] = [];
+    for (const file of files) {
+      try {
+        if (!/\.nbt$/i.test(file.name)) throw new Error("not a .nbt file");
+        const bytes = await file.arrayBuffer();
+        await readStructure(bytes); // reject non-structure files before storing them
+        const key = await saveStructureFile(new Blob([bytes]), file.name);
+        const base = file.name.replace(/\.nbt$/i, "");
+        added.push({ ...normalizeElement(def, { id: base, name: base, structure: key }), ...(folder ? { folder } : {}) });
+      } catch (e) {
+        failed.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (failed.length) toast.error(`Could not read ${failed.length === 1 ? "this structure" : "these structures"}:\n${failed.join("\n")}`, { duration: 10_000 });
+    if (!added.length) return;
+    commitLatest((cur) => {
+      const list = cur.elements?.structure ?? [];
+      const taken = list.map((e) => e.id);
+      const fresh = added.map((spec) => {
+        const id = recordId(spec.id, "structure", taken);
+        taken.push(id);
+        return { ...spec, id };
+      });
+      return { ...cur, elements: { ...cur.elements, structure: [...list, ...fresh] } };
+    });
+    toast.success(`Added ${added.length} structure${added.length === 1 ? "" : "s"}.`);
   }
 
   // ── Element folders (category view) — names live in entry.elementFolders[kind], membership in
@@ -2498,6 +2558,17 @@ export default function EditorPage() {
       setHistory((h) => h.map((e, i) => (i === cursorRef.current ? { ...e, activeElement: { kind, idx: index }, activeDocType: "element" } : e)));
     },
     uploadTexture: uploadCustomTexture,
+    builtins: Object.fromEntries(BUILTIN_COLLECTIONS.map((c) => [c.key, (latestEntryRef.current as unknown as Record<string, Record<string, unknown>[]>)[c.key] ?? []])),
+    setBuiltin: (key, list, open) => {
+      const def = BUILTIN_COLLECTIONS.find((c) => c.key === key);
+      if (!def) return;
+      commitLatest((cur) => ({
+        ...cur,
+        [key]: list,
+        ...(open !== undefined && def.activeKey && def.docType ? { [def.activeKey]: open, activeDocType: def.docType as ActiveDocType } : {}),
+      }));
+      if (open !== undefined && def.docType) setMainView(null);
+    },
   });
   const editorApiRef = useRef(editorApi);
   useEffect(() => { editorApiRef.current = editorApi; });
@@ -2509,6 +2580,8 @@ export default function EditorPage() {
   // Entity Model Generator: its agent run starts its own MCP server on a free port — bridge to it
   // for the run, with the same tool executor as the regular bridge.
   const agentRun = useAgentRun();
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatProvider = useChatProvider();
   const agentBridge = useMcpBridge(
     agentRun.port !== null, agentRun.port ?? 0,
     (cmd) => runTool(() => editorApiRef.current(), cmd.tool, cmd.args),
@@ -2619,6 +2692,8 @@ export default function EditorPage() {
               onToggleTryMode={() => { setTryMode((v) => { if (!v) setSelectedId(null); return !v; }); }}
               onScreenChange={(patch) => commitScreen({ ...screen, ...patch })}
               onExportProject={handleExportProject}
+              onOpenChat={() => setChatOpen((v) => !v)}
+              chatOpen={chatOpen}
               onImportProject={handleImportProjectClick}
               onCopyJava={handleCopyJava}
               onResetTextures={handleResetTextures}
@@ -2640,6 +2715,10 @@ export default function EditorPage() {
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={undo} disabled={cursor === 0}>Undo</Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={redo} disabled={cursor >= history.length - 1}>Redo</Button>
               <div className="flex-1" />
+              <Button variant="ghost" size="sm" className={`h-6 gap-1 px-2 text-xs ${chatOpen ? "bg-accent text-primary" : ""}`} aria-pressed={chatOpen}
+                title={`${chatProviderLabel(chatProvider)} — let the AI use the editor's features`} onClick={() => setChatOpen((v) => !v)}>
+                <MessageSquare className="h-3.5 w-3.5" /> {chatProviderLabel(chatProvider)}
+              </Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleExportProject}>Export Project</Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleImportProjectClick}>Import Project</Button>
             </div>
@@ -2704,7 +2783,14 @@ export default function EditorPage() {
             />
           ) : mainView?.kind === "section" && !isToolSection(mainView.key) ? (
             // eslint-disable-next-line react-hooks/refs -- the import handlers only touch refs when clicked
-            <CategoryView key={mainView.key} {...categoryView(mainView.key)} />
+            <>
+              <CategoryView key={mainView.key} {...categoryView(mainView.key)} />
+              {mainView.key === "creativeTabs" && (
+                <TexturePickerModal open={tabIconFor !== null} packTextures={packTextures} current={tabIconFor !== null ? creativeTabs[tabIconFor]?.icon ?? "" : ""}
+                  onSelect={(k) => { if (tabIconFor !== null) setCreativeTabIcon(tabIconFor, k); setTabIconFor(null); }}
+                  onClose={() => setTabIconFor(null)} onUpload={uploadCustomTexture} />
+              )}
+            </>
           ) : (
           <div className="flex flex-1 overflow-hidden">
             {activeDocType === "screen" ? (
@@ -3096,11 +3182,11 @@ export default function EditorPage() {
                 <button
                   type="button"
                   className="flex items-center gap-1.5 rounded-sm px-1 text-foreground hover:bg-accent"
-                  title="Entity Model Generator is building — click to see its log"
-                  onClick={() => setMainView({ kind: "section", key: "modelGenerator" })}
+                  title={agentRun.mode === "chat" ? "Codex Chat is working — click to open it" : "Entity Model Generator is building — click to see its log"}
+                  onClick={() => (agentRun.mode === "chat" ? setChatOpen(true) : setMainView({ kind: "section", key: "modelGenerator" }))}
                 >
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
-                  Model generator{agentBridge.lastTool ? ` · ${agentBridge.lastTool}` : " · starting"}
+                  {agentRun.mode === "chat" ? "Codex Chat" : "Model generator"}{agentBridge.lastTool ? ` · ${agentBridge.lastTool}` : " · starting"}
                 </button>
                 <button type="button" className="rounded-sm px-1 hover:bg-destructive hover:text-white" onClick={stopAgentRun}>Stop</button>
               </span>
@@ -3132,6 +3218,29 @@ export default function EditorPage() {
             <span>{screen.modId || "Unnamed project"}</span>
           </div>
         </div>
+
+        {chatOpen && !tryMode && (
+          <CodexChatPanel
+            activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
+            projectKey={projectKey}
+            onAssignTexture={(target, key) => {
+              const api = editorApiRef.current();
+              const list = api.builtins[target.collection];
+              if (list) {
+                const i = list.findIndex((r) => r.id === target.id);
+                if (i < 0) return false;
+                api.setBuiltin(target.collection, list.map((r, j) => (j === i ? { ...r, [target.field]: key } : r)), i);
+                return true;
+              }
+              const elements = api.elements[target.collection];
+              const i = elements ? elements.findIndex((e) => e.id === target.id) : -1;
+              if (!elements || i < 0) return false;
+              api.setElements(target.collection, elements.map((e, j) => (j === i ? { ...e, [target.field]: key } : e)), i);
+              return true;
+            }}
+            onClose={() => setChatOpen(false)}
+          />
+        )}
 
         <input
           ref={importRef}

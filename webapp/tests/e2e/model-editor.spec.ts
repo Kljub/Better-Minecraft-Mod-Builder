@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
-import { seedTextures, seedProject, openEditor } from "../support/seed";
+import { seedTextures, seedProject, openEditor, seedPackTexture, chestSkinBase64 } from "../support/seed";
 
 async function newModel(page: import("@playwright/test").Page) {
   await seedTextures(page);
+  await seedPackTexture(page, "entity/chest/normal.png", chestSkinBase64());
   await seedProject(page, { id: "main", width: 320, height: 180, modId: "mymod", widgets: [] });
   await openEditor(page);
   await page.getByTitle("Entity Models", { exact: true }).click();
@@ -243,4 +244,56 @@ test("model editor: rewrite the selected animation with AI (one undo step)", asy
   expect(sent.prompt).toBe("a bouncy idle");
   expect(sent.context?.bones?.map((b) => b.name)).toContain("body");
   await expect(page.getByTestId("animation-timeline")).toContainText("idle");
+});
+
+test("model editor: click rotates, double-click resizes one side only, snapping per pixel", async ({ page }) => {
+  await newModel(page);
+  const decline = page.getByRole("button", { name: "Decline" });
+  if (await decline.isVisible().catch(() => false)) await decline.click();
+  await page.getByLabel("View").selectOption("front");
+  const vp = page.getByTestId("model-viewport");
+  const box = (await vp.boundingBox())!;
+  // Front view: camera at z = -64 looking at (0, 10, 0), fov 45 — the default cube spans x -4..4, y 0..8.
+  const half = Math.tan((22.5 * Math.PI) / 180) * 64; // world units from the centre to the top edge at z = 0
+  const toScreen = (x: number, y: number) => ({
+    x: box.x + box.width / 2 - (x / half) * (box.height / 2),
+    y: box.y + box.height / 2 - ((y - 10) / half) * (box.height / 2),
+  });
+  const cube = toScreen(0, 4);
+  await page.mouse.click(cube.x, cube.y);
+  await expect(page.getByRole("button", { name: /^Rotate/ })).toHaveAttribute("aria-pressed", "true");
+  await page.mouse.dblclick(cube.x, cube.y);
+  await expect(page.getByRole("button", { name: /^Resize/ })).toHaveAttribute("aria-pressed", "true");
+  if (process.env.SHOT_DIR) await vp.screenshot({ path: `${process.env.SHOT_DIR}/resize-handles.png` });
+
+  // East handle sits 1.2 px outside the +x face; dragging it 3 px outward only moves that face.
+  const handle = toScreen(4 + 1.2, 4);
+  const target = toScreen(4 + 1.2 + 3, 4);
+  await page.mouse.move(handle.x, handle.y);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y, { steps: 12 });
+  await page.waitForTimeout(200);
+  await page.mouse.move(target.x - 1, target.y);
+  await page.mouse.up();
+  const props = page.getByTestId("model-properties");
+  await expect(props.locator("span:text-is('Size') + div input").first()).toHaveValue("11");
+  await expect(props.locator("span:text-is('Position (from)') + div input").first()).toHaveValue("-4");
+});
+
+test("model editor: Block import — a chest skin brings the chest geometry and its texture", async ({ page }) => {
+  await newModel(page);
+  const decline = page.getByRole("button", { name: "Decline" });
+  if (await decline.isVisible().catch(() => false)) await decline.click();
+  await page.getByRole("button", { name: "Block", exact: true }).click();
+  const picker = page.getByRole("dialog");
+  await picker.getByPlaceholder("Search…").fill("chest/normal");
+  await picker.getByTitle(/entity\/chest\/normal\.png/).first().click();
+  await picker.getByRole("button", { name: /^Select/ }).click();
+  const outliner = page.getByTestId("model-outliner");
+  for (const name of ["chest", "lid", "bottom", "lock"]) await expect(outliner.locator(`[data-outliner="${name}"]`).first()).toBeVisible();
+  await expect(page.getByTestId("model-editor").getByText("3 cubes", { exact: true })).toBeVisible();
+  if (process.env.SHOT_DIR) {
+    await page.waitForTimeout(3000);
+    await page.getByTestId("model-viewport").screenshot({ path: `${process.env.SHOT_DIR}/chest-entity.png` });
+  }
 });

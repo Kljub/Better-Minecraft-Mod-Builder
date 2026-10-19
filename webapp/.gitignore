@@ -54,3 +54,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Codex Chat training data recorded without accounts (lib/server/chatDataset.ts)
+/training-data/

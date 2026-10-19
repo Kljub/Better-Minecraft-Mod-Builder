@@ -598,7 +598,8 @@ modifier for the chosen slot; armor's actual defense/toughness/knockback-resista
 |---|---|---|
 | `id` | string | registry name |
 | `displayName` | string | shown literally |
-| `texture` | string | single texture applied to all 6 faces (`cube_all`) |
+| `texture` | string | single texture applied to all 6 faces (`cube_all`); for `model: "chest"` a 64×64 chest skin |
+| `model` | `"cube"` \| `"chest"` | `"chest"`: a working single chest (27 slots, lid animation) with its own block entity type `<modid>:chest`; drawn from `textures/entity/chest/<id>.png` |
 | `hardness`, `resistance` | number | `BlockBehaviour.Properties.strength(...)` |
 | `requiresTool` | boolean | |
 | `luminance` | number | 0-15 |
@@ -636,9 +637,16 @@ custom attribute id interchangeably.
   `BuildCreativeModeTabContentsEvent`;
 - `"custom"` (the default) — one tab shared by every item/block in the project that uses it,
   titled after `modId`;
+- `"none"` — in no tab at all; the item/block exists but is only reachable with `/give`;
 - any other string — a project-defined named tab (the web tool's "Creative Tabs" sidebar section)
-  gets its own `DeferredRegister<CreativeModeTab>` entry, titled after that id, icon = its first
-  item/block.
+  gets its own `DeferredRegister<CreativeModeTab>` entry, titled after its `displayName` from
+  `screenspec/creative_tabs.json` (else the id), icon = its first item/block.
+
+`extraCreativeTabs` (string array, optional) adds the item/block/armor to further tabs as well.
+
+`screenspec/creative_tabs.json` lists the project tabs: `{ id, displayName, icon }`. With
+`icon: true` the export ships an icon image as item `<id>_tab_icon` (model and texture included),
+which the runtime registers in no tab and uses as the tab's icon.
 
 ### Effects and Potions
 
@@ -725,6 +733,7 @@ array at `assets/<modid>/screenspec/elements/<name>.json` — next to the usual 
 | `game_rules` | a `minecraft:game_rule` entry `<modid>:<id>` | boolean or bounded integer; read from mod code with `GameRuleSpecs.getBoolean/getInteger(server, modId, id)` |
 | `fluids` | `FluidType`, source + `flowing_<id>` fluid, `LiquidBlock`, optional `<id>_bucket` | renders as vanilla water/lava tinted with `color` (`RegisterFluidModelsEvent`) |
 | `villager_professions` | `VillagerProfession` + its `PoiType` | job-site block must not already be a vanilla POI; trades come from the exported `trade_set/<id>/level_1..5` data |
+| `wandering_traders` | a wandering-trader `EntityType` (vanilla AI, despawning, llamas) + spawn egg + spawner | offers come from the exported `trade_set/<id>/common|rare|buying`; spawns like vanilla's (chance, interval, `spawnWanderingTraders` game rule) |
 | `plants` | flower (`FlowerBlock`, optional `potted_<id>`) or tall flower (`TallFlowerBlock`) + items | worldgen, loot tables and models are exported data |
 | `particles` | a `SimpleParticleType` + configurable client particle | lifetime, gravity, scale, friction, tint, emissive, animated frames from `particles/<id>.json` |
 | `key_bindings` | a `KeyMapping` (client only) | sends a command as the player, or opens one of the mod's exported plain screens |

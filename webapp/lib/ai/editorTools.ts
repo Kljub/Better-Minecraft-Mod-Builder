@@ -14,6 +14,10 @@ import { toBedrockAnimations, toJavaAnimations } from "@/lib/model3d/animation";
 import { defaultEntitySettings } from "@/lib/elements/entitySettings";
 import { paintCubes, paintFace, paintTexture, type PaintOp } from "./texturePaint";
 import { activeModelEditor } from "./modelEditorRegistry";
+import { BUILTIN_COLLECTIONS, builtinCollection, describeCollection, recordId } from "./builtinCollections";
+import { proposeImages, updateImageProposal } from "./imageProposals";
+import { genId } from "@/lib/utils";
+import { fitImage } from "@/lib/imageFit";
 
 /** What the tools need from the editor page — rebuilt every render, read through a ref. */
 export interface EditorApi {
@@ -29,6 +33,10 @@ export interface EditorApi {
   /** replace a kind's list (one undo step); `open` = index to open afterwards */
   setElements: (kind: string, list: ElementSpec[], open?: number) => void;
   openElement: (kind: string, index: number) => void;
+  /** built-in categories (items, blocks, recipes, …) by collection key — see lib/ai/builtinCollections */
+  builtins: Record<string, Record<string, unknown>[]>;
+  /** replace a built-in list (one undo step); `open` = index to open afterwards */
+  setBuiltin: (collection: string, list: Record<string, unknown>[], open?: number) => void;
   uploadTexture: (file: File) => Promise<string>;
 }
 
@@ -119,6 +127,97 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
       api().setElements(kind, list(kind).map((e, j) => (j === i ? next : e)), i);
       await nextFrame();
       return { ok: true, problems: def.validate?.(next, { modId: api().modId, mcVersion: api().mcVersion }) ?? [] };
+    }
+    case "generate_image":
+    case "generate_item_skin":
+    case "generate_gui_texture": {
+      // Generation takes a while (Codex images ~1 min, the skin model 10–60 s) — start it and answer
+      // at once; the chat shows the pictures as "generating" and fills them in (lib/ai/imageProposals).
+      const skin = tool === "generate_item_skin";
+      const gui = tool === "generate_gui_texture";
+      const guiW = Math.min(512, Math.max(16, Math.round(Number(a.width) || 350)));
+      const guiH = Math.min(512, Math.max(16, Math.round(Number(a.height) || 200)));
+      const count = Math.min(skin ? 4 : 2, Math.max(1, Math.round(Number(a.count) || 1)));
+      const stem = typeof a.name === "string" && /^[a-z0-9_]+$/.test(a.name) ? a.name : skin ? "ki_texture" : gui ? "ki_gui" : "ki_image";
+      const target = a.assign_to as unknown as { collection?: string; id?: string; field?: string } | undefined;
+      const assign = target?.collection && target.id ? { collection: String(target.collection), id: String(target.id), field: String(target.field || "texture") } : undefined;
+      const size = !skin && Number(a.size) > 0 ? Math.min(512, Math.max(8, Math.round(Number(a.size)))) : undefined;
+      const images = Array.from({ length: count }, (_, i) => ({
+        id: genId(), name: `${stem}${i ? `_${i + 1}` : ""}.png`, dataUrl: "", status: "generating" as const,
+        ...(assign ? { assign } : {}), ...(size ? { size } : {}),
+      }));
+      proposeImages(images);
+      const post = async (url: string, payload: unknown): Promise<string[]> => {
+        const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const body = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
+        return ((body?.images ?? []) as (string | { dataUrl: string })[]).map((x) => (typeof x === "string" ? x : x.dataUrl));
+      };
+      const mode = a.mode === "block" ? "block" : a.mode === "armor" ? "armor" : a.mode === "player" ? "player" : "text";
+      const job = gui
+        // Screen GUI Generator (Codex engine): ~1254 px squares fitted to the GUI size, pixelated like in its tab.
+        ? post("/api/gui/codex", { prompt: String(a.prompt ?? ""), count, width: guiW, height: guiH })
+          .then((urls) => Promise.all(urls.map((u) => fitImage(u, guiW, guiH, { pixelate: true }))))
+        : skin
+        // Item Skin Generator: the local generator (tools/skin-generator) first; plain item textures fall back to the public demo Space.
+        ? post("/api/skin/generate", { backend: "local", mode, prompt: String(a.prompt ?? ""), count, seed: -1 })
+          .catch((e) => (mode === "text" ? post("/api/skin/generate", { backend: "space", mode, prompt: String(a.prompt ?? ""), count, seed: -1 }) : Promise.reject(e)))
+        : post("/api/ai/image", { prompt: String(a.prompt ?? ""), count });
+      void job.then((urls) => {
+        images.forEach((img, i) => updateImageProposal(img.id, urls[i] ? { dataUrl: urls[i], status: "pending" } : { status: "failed", error: "no image returned" }));
+      }).catch((e) => {
+        images.forEach((img) => updateImageProposal(img.id, { status: "failed", error: e instanceof Error ? e.message : String(e) }));
+      });
+      return {
+        ok: true, images: images.map((x) => x.name),
+        ...(assign ? { assign_to: `${assign.collection}/${assign.id}.${assign.field} — applied when the user adds it` } : {}),
+        note: "Generation started. The picture appears in the chat by itself and the user decides whether to add it to Resources (folder KI). Don't wait for it and don't start it again for the same picture — just tell the user it's being made.",
+      };
+    }
+    case "list_textures": {
+      // Pack textures the project can use: vanilla ones ("item/diamond_sword.png", "block/stone.png") and custom ones ("custom/…").
+      const q = String(a.query ?? "").toLowerCase().trim();
+      const keys = Object.keys(api().packTextures).filter((k) => !q || k.toLowerCase().includes(q)).sort((x, y) => Number(x.startsWith("custom/")) - Number(y.startsWith("custom/")) || x.localeCompare(y));
+      return { total: keys.length, textures: keys.slice(0, Math.min(200, Number(a.limit) || 60)) };
+    }
+    case "list_collections":
+      return BUILTIN_COLLECTIONS.map((c) => ({ collection: c.key, label: c.label, count: (api().builtins[c.key] ?? []).length }));
+    case "describe_collection":
+      return describeCollection(builtinCollection(String(a.collection)));
+    case "list_records": {
+      const def = builtinCollection(String(a.collection));
+      return api().builtins[def.key] ?? [];
+    }
+    case "create_record": {
+      const def = builtinCollection(String(a.collection));
+      const cur = api().builtins[def.key] ?? [];
+      const raw = (a.record as Record<string, unknown>) ?? {};
+      const id = recordId(raw.id, def.idPrefix, cur.map((r) => String(r.id)));
+      const base = def.defaults(id);
+      const unknown = Object.keys(raw).filter((k) => !(k in base) && !def.fields?.some((f) => f.key === k) && !["attributes", "durability", "nutrition", "saturation", "alwaysEdible", "armorSlot"].includes(k));
+      const record = { ...base, ...raw, id };
+      api().setBuiltin(def.key, [...cur, record], def.docType ? cur.length : undefined);
+      await nextFrame();
+      return { ok: true, collection: def.key, id, ...(unknown.length ? { warning: `fields not known for ${def.key}: ${unknown.join(", ")} — kept, check describe_collection` } : {}) };
+    }
+    case "update_record": {
+      const def = builtinCollection(String(a.collection));
+      const cur = api().builtins[def.key] ?? [];
+      const i = cur.findIndex((r) => r.id === String(a.id));
+      if (i < 0) throw new Error(`${def.key} "${a.id}" not found`);
+      const changes = { ...((a.changes as Record<string, unknown>) ?? {}) };
+      if ("id" in changes) changes.id = recordId(changes.id, def.idPrefix, cur.filter((_, j) => j !== i).map((r) => String(r.id)));
+      api().setBuiltin(def.key, cur.map((r, j) => (j === i ? { ...r, ...changes } : r)), def.docType ? i : undefined);
+      await nextFrame();
+      return { ok: true, collection: def.key, record: { ...cur[i], ...changes } };
+    }
+    case "delete_record": {
+      const def = builtinCollection(String(a.collection));
+      const cur = api().builtins[def.key] ?? [];
+      if (!cur.some((r) => r.id === String(a.id))) throw new Error(`${def.key} "${a.id}" not found`);
+      api().setBuiltin(def.key, cur.filter((r) => r.id !== String(a.id)));
+      await nextFrame();
+      return { ok: true };
     }
     case "open_element":
       api().openElement(String(a.kind), indexOf(String(a.kind), String(a.id)));

@@ -191,3 +191,27 @@ export async function openWidgetHarness(page: Page, opts: HarnessOptions): Promi
   await page.reload();
   await page.waitForSelector('[data-harness-state="ready"]');
 }
+
+/** Adds one more pack texture (base64 PNG) under `key`, after seedTextures. Call before navigating. */
+export async function seedPackTexture(page: Page, key: string, b64: string): Promise<void> {
+  await page.addInitScript(({ key, b64 }) => {
+    const w = window as unknown as { __seedTexturesPromise: Promise<void> };
+    w.__seedTexturesPromise = w.__seedTexturesPromise.then(() => new Promise<void>((resolve, reject) => {
+      const req = indexedDB.open("mc-ui-builder", 1);
+      req.onsuccess = () => {
+        const tx = req.result.transaction("textures", "readwrite");
+        tx.objectStore("textures").put(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: "image/png" }), `pack:${key}`);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      };
+    }));
+  }, { key, b64 });
+}
+
+/** A 64×64 chest skin for tests: the real one when CHEST_SKIN points to it, else a 1×1 PNG. */
+export function chestSkinBase64(): string {
+  const file = process.env.CHEST_SKIN;
+  return file && fs.existsSync(file)
+    ? fs.readFileSync(file).toString("base64")
+    : "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+}

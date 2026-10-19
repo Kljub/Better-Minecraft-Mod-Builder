@@ -27,14 +27,18 @@ import sheepfromheaven.screenspec.runtime.effect.EffectSpec;
 import sheepfromheaven.screenspec.runtime.effect.EffectSpecs;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpec;
 import sheepfromheaven.screenspec.runtime.effect.PotionSpecs;
+import sheepfromheaven.screenspec.runtime.item.CreativeTabSpec;
 import sheepfromheaven.screenspec.runtime.item.ItemSpec;
 import sheepfromheaven.screenspec.runtime.item.ItemSpecs;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -99,17 +103,23 @@ public final class ModContent {
         DeferredRegister.Items armorRegister = ArmorSpecs.createRegister(modId);
 
         Map<String, DeferredItem<Item>> registeredItems = ItemSpecs.registerAll(itemRegister, items, modId, registeredAttributes);
-        Map<String, DeferredBlock<Block>> registeredBlocks = BlockSpecs.registerAll(blockRegister, itemRegister, blocks);
+        Map<String, DeferredBlock<Block>> registeredBlocks = BlockSpecs.registerAll(modId, modBus, blockRegister, itemRegister, blocks);
         Map<String, DeferredItem<Item>> registeredArmorPieces = ArmorSpecs.registerAll(armorRegister, armors, modId);
         if (net.neoforged.fml.loading.FMLEnvironment.getDist() == net.neoforged.api.distmarker.Dist.CLIENT) {
             sheepfromheaven.screenspec.runtime.armor.client.ArmorModelsClient.register(modId, modBus, armors, registeredArmorPieces);
+        }
+
+        List<CreativeTabSpec> tabs = Arrays.asList(GsonSpecIO.fromClasspath(modId, "creative_tabs", CreativeTabSpec[].class));
+        Map<String, DeferredItem<Item>> tabIcons = new HashMap<>();
+        for (CreativeTabSpec tab : tabs) {
+            if (tab != null && tab.icon && tab.id != null) tabIcons.put(tab.id, itemRegister.registerSimpleItem(tab.id + "_tab_icon"));
         }
 
         itemRegister.register(modBus);
         blockRegister.register(modBus);
         armorRegister.register(modBus);
 
-        registerCreativeTabContent(modId, modBus, items, blocks, armors, registeredItems, registeredBlocks, registeredArmorPieces);
+        registerCreativeTabContent(modId, modBus, items, blocks, armors, registeredItems, registeredBlocks, registeredArmorPieces, tabs, tabIcons);
     }
 
     private static final String[] ARMOR_PIECES = { "helmet", "chestplate", "leggings", "boots" };
@@ -118,7 +128,8 @@ public final class ModContent {
             String modId, IEventBus modBus,
             List<ItemSpec> items, List<BlockSpec> blocks, List<ArmorSpec> armors,
             Map<String, DeferredItem<Item>> registeredItems, Map<String, DeferredBlock<Block>> registeredBlocks,
-            Map<String, DeferredItem<Item>> registeredArmorPieces) {
+            Map<String, DeferredItem<Item>> registeredArmorPieces,
+            List<CreativeTabSpec> tabSpecs, Map<String, DeferredItem<Item>> tabIcons) {
 
         // Keyed by the item/block/armor's raw `creativeTab` string — "custom" is just another id
         // here (its own single-entry tab, titled after modId below), same treatment as any other
@@ -129,19 +140,19 @@ public final class ModContent {
         for (ItemSpec spec : items) {
             DeferredItem<Item> item = registeredItems.get(spec.id);
             if (item == null) continue;
-            addToTab(spec.creativeTab, item::toStack, namedTabEntries, vanillaTabEntries);
+            addToTabs(spec.creativeTab, spec.extraCreativeTabs, item::toStack, namedTabEntries, vanillaTabEntries);
         }
         for (BlockSpec spec : blocks) {
             if (!spec.hasItem) continue;
             DeferredBlock<Block> block = registeredBlocks.get(spec.id);
             if (block == null) continue;
-            addToTab(spec.creativeTab, () -> new ItemStack(block.get()), namedTabEntries, vanillaTabEntries);
+            addToTabs(spec.creativeTab, spec.extraCreativeTabs, () -> new ItemStack(block.get()), namedTabEntries, vanillaTabEntries);
         }
         for (ArmorSpec spec : armors) {
             for (String piece : ARMOR_PIECES) {
                 DeferredItem<Item> item = registeredArmorPieces.get(ArmorSpecs.pieceId(spec, piece));
                 if (item == null) continue;
-                addToTab(spec.creativeTab, item::toStack, namedTabEntries, vanillaTabEntries);
+                addToTabs(spec.creativeTab, spec.extraCreativeTabs, item::toStack, namedTabEntries, vanillaTabEntries);
             }
         }
 
@@ -158,8 +169,11 @@ public final class ModContent {
             for (Map.Entry<String, List<Supplier<ItemStack>>> tab : namedTabEntries.entrySet()) {
                 String tabId = tab.getKey();
                 List<Supplier<ItemStack>> entries = tab.getValue();
-                Supplier<ItemStack> icon = entries.get(0);
-                String title = "custom".equals(tabId) ? modId : tabId;
+                CreativeTabSpec spec = tabSpecs.stream().filter(t -> t != null && tabId.equals(t.id)).findFirst().orElse(null);
+                DeferredItem<Item> iconItem = tabIcons.get(tabId);
+                Supplier<ItemStack> icon = iconItem != null ? iconItem::toStack : entries.get(0);
+                String title = spec != null && spec.displayName != null && !spec.displayName.isBlank() ? spec.displayName
+                    : "custom".equals(tabId) ? modId : tabId;
                 tabRegister.register(tabId, () -> CreativeModeTab.builder()
                     .title(Component.literal(title))
                     .icon(icon)
@@ -170,6 +184,18 @@ public final class ModContent {
             }
             tabRegister.register(modBus);
         }
+    }
+
+    /** Adds to the main tab and every extra one; {@code "none"} as main tab means no tab at all. */
+    private static void addToTabs(
+            String creativeTab, List<String> extra, Supplier<ItemStack> stack,
+            Map<String, List<Supplier<ItemStack>>> namedTabEntries,
+            Map<ResourceKey<CreativeModeTab>, List<Supplier<ItemStack>>> vanillaTabEntries) {
+        if ("none".equals(creativeTab)) return;
+        Set<String> seen = new LinkedHashSet<>();
+        seen.add(creativeTab == null || creativeTab.isBlank() ? "custom" : creativeTab);
+        if (extra != null) for (String t : extra) if (t != null && !t.isBlank() && !"none".equals(t)) seen.add(t);
+        for (String t : seen) addToTab(t, stack, namedTabEntries, vanillaTabEntries);
     }
 
     private static void addToTab(

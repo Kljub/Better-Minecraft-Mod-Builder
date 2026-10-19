@@ -7,6 +7,7 @@
  *   npm run dataset:export -- out.jsonl            # live models
  *   npm run dataset:export -- out.jsonl --deleted  # including removed ones
  *   npm run dataset:export -- out.jsonl --ai-only  # only models built from a prompt
+ *   npm run dataset:export -- out.jsonl --chats    # Codex Chat turns instead (conversation → tool calls)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -34,6 +35,24 @@ const conn = await mysql.createConnection({
   host: env.MMB_DB_HOST || "127.0.0.1", port: Number(env.MMB_DB_PORT || 3306),
   user: env.MMB_DB_USER, password: env.MMB_DB_PASSWORD, database: env.MMB_DB_NAME,
 });
+
+if (args.includes("--chats")) {
+  const [chats] = await conn.execute(
+    "SELECT c.*, u.username FROM mmb_ai_chats c JOIN mmb_users u ON u.id = c.user_id ORDER BY c.user_id, c.conversation_id, c.turn, c.id");
+  await conn.end();
+  const parseJson = (v) => { if (v == null) return null; try { return JSON.parse(String(v)); } catch { return null; } };
+  const chatOut = fs.createWriteStream(outPath);
+  for (const r of chats) {
+    chatOut.write(JSON.stringify({
+      id: Number(r.id), user: r.username, conversation_id: r.conversation_id, turn: Number(r.turn), provider: r.provider,
+      project_key: r.project_key ?? null, messages: parseJson(r.messages_json) ?? [], tools: parseJson(r.tools_json) ?? [],
+      ok: !!r.ok, created_at: Number(r.created_at),
+    }) + "\n");
+  }
+  chatOut.end();
+  console.error(`${chats.length} chat turns → ${outPath}`);
+  process.exit(0);
+}
 const [rows] = await conn.execute(
   `SELECT m.*, u.username, f.data AS texture_png FROM mmb_models m
    JOIN mmb_users u ON u.id = m.user_id

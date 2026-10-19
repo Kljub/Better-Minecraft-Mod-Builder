@@ -12,6 +12,8 @@ export interface AgentLogLine { kind: "tool" | "text" | "error" | "info"; text: 
 
 export interface AgentRunState {
   running: boolean;
+  /** "model": Entity Model Generator; "chat": Codex Chat in the editor header */
+  mode: "model" | "chat";
   /** port of the run's MCP server while it's up — the page bridges to it */
   port: number | null;
   provider: string | null;
@@ -20,7 +22,7 @@ export interface AgentRunState {
   result: { ok: boolean; text: string } | null;
 }
 
-const IDLE: AgentRunState = { running: false, port: null, provider: null, log: [], result: null };
+const IDLE: AgentRunState = { running: false, mode: "model", port: null, provider: null, log: [], result: null };
 let state: AgentRunState = IDLE;
 let controller: AbortController | null = null;
 const listeners = new Set<() => void>();
@@ -46,10 +48,16 @@ export async function startAgentRun(opts: {
   context: Record<string, unknown>;
   /** optional reference images (data URLs), each labelled with the view it shows */
   images?: { data: string; view: string }[];
+  mode?: "model" | "chat";
+  /** chat: earlier turns */
+  history?: { role: "user" | "assistant"; text: string }[];
+  /** chat: conversation id + project, stored with the turn as training data */
+  conversationId?: string;
+  projectKey?: string;
 }) {
   if (state.running) return;
   controller = new AbortController();
-  set({ ...IDLE, running: true, provider: opts.provider, log: [{ kind: "info", text: `Starting ${opts.provider === "claude" ? "Claude Code" : "Codex"}…` }] });
+  set({ ...IDLE, running: true, mode: opts.mode ?? "model", provider: opts.provider, log: [{ kind: "info", text: `Starting ${opts.provider === "claude" ? "Claude Code" : "Codex"}…` }] });
   try {
     const res = await fetch("/api/ai/agent", {
       method: "POST",
@@ -103,4 +111,9 @@ export function stopAgentRun() {
 
 export function clearAgentRun() {
   if (!state.running) set(IDLE);
+}
+
+/** Current run state outside React (e.g. right after `await startAgentRun(...)`). */
+export function agentRunState(): AgentRunState {
+  return state;
 }

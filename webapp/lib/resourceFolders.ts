@@ -110,3 +110,10 @@ export function forgetKey(key: string) {
   const { [key]: _removed, ...rest } = s.assign; // eslint-disable-line @typescript-eslint/no-unused-vars
   set({ ...s, assign: rest });
 }
+
+/** The folder an image is in (null = Unsorted), outside React (e.g. a duplicate keeps its folder). */
+export function folderOfKey(key: string): string | null {
+  const s = load();
+  const f = s.assign[key];
+  return f && s.folders.includes(f) ? f : null;
+}

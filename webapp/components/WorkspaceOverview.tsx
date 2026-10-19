@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Search, SquareArrowOutUpRight, Pencil, Copy, Download, Clipboard, Trash2 } from "lucide-react";
+import { Search, SquareArrowOutUpRight, Pencil, Copy, Download, Clipboard, Trash2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { copyToClipboard } from "@/lib/utils";
 
@@ -36,10 +36,25 @@ export interface WorkspaceSection {
  * filterable by type and searchable by name/id. Opened from the sidebar rail's
  * "All categories" entry.
  */
+const COLLAPSED_KEY = "mc-ui-builder:workspace-collapsed";
+
 export default function WorkspaceOverview({ sections }: { sections: WorkspaceSection[] }) {
   const [filter, setFilter] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; entry: WorkspaceEntry; section: string } | null>(null);
+  // Collapsed sections, remembered per browser (a convenience — empty when storage is unavailable).
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]") as string[]); } catch { return new Set(); }
+  });
+  const saveCollapsed = (next: Set<string>) => {
+    setCollapsed(next);
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next])); } catch { /* storage unavailable */ }
+  };
+  const toggle = (key: string) => {
+    const next = new Set(collapsed);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    saveCollapsed(next);
+  };
   const q = query.trim().toLowerCase();
   const total = sections.reduce((n, s) => n + s.entries.length, 0);
 
@@ -84,6 +99,18 @@ export default function WorkspaceOverview({ sections }: { sections: WorkspaceSec
         </div>
         {chip(null, "All", total)}
         {sections.filter((s) => s.entries.length > 0).map((s) => chip(s.key, s.label, s.entries.length))}
+        {visible.length > 1 && (
+          <div className="ml-auto flex items-center gap-1">
+            <button type="button" title="Collapse all" onClick={() => saveCollapsed(new Set([...collapsed, ...visible.map((v) => v.key)]))}
+              className="flex h-6 items-center gap-1 rounded-sm border border-input px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+              <ChevronsDownUp className="h-3.5 w-3.5" /> Collapse all
+            </button>
+            <button type="button" title="Expand all" onClick={() => saveCollapsed(new Set([...collapsed].filter((k) => !visible.some((v) => v.key === k))))}
+              className="flex h-6 items-center gap-1 rounded-sm border border-input px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+              <ChevronsUpDown className="h-3.5 w-3.5" /> Expand all
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
@@ -94,13 +121,21 @@ export default function WorkspaceOverview({ sections }: { sections: WorkspaceSec
         ) : visible.length === 0 ? (
           <div className="mt-16 text-center text-sm text-muted-foreground">No elements match “{query}”.</div>
         ) : (
-          visible.map(({ key, label, icon: Icon, entries }) => (
-            <section key={key} className="mb-5">
-              <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-                <span className="font-normal opacity-70">({entries.length})</span>
+          visible.map(({ key, label, icon: Icon, entries }) => {
+            // While searching, every section with hits is shown open.
+            const open = !!q || !collapsed.has(key);
+            return (
+            <section key={key} className={open ? "mb-5" : "mb-2"} data-testid={`workspace-section-${key}`}>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <button type="button" aria-expanded={open} onClick={() => toggle(key)} title={open ? `Collapse ${label}` : `Expand ${label}`}
+                  className="flex items-center gap-1.5 rounded-sm pr-1 uppercase hover:text-foreground">
+                  {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                  <span className="font-normal opacity-70">({entries.length})</span>
+                </button>
               </h3>
+              {open && (
               <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-2">
                 {entries.map((e) => (
                   <button
@@ -128,8 +163,10 @@ export default function WorkspaceOverview({ sections }: { sections: WorkspaceSec
                   </button>
                 ))}
               </div>
+              )}
             </section>
-          ))
+            );
+          })
         )}
       </div>
       {menu && <EntryContextMenu {...menu} onClose={() => setMenu(null)} />}

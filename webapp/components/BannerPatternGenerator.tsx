@@ -36,6 +36,7 @@ interface Emblem {
 
 async function loadImageData(dataUrl: string): Promise<ImageData> {
   const img = new Image();
+  img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
   img.src = dataUrl;
   await img.decode();
   const c = document.createElement("canvas");
@@ -102,6 +103,7 @@ function DyedPreview({ texture, kind, base, dye }: { texture: string; kind: "ban
     if (!canvas) return;
     const [fx, fy, fw, fh] = kind === "banner" ? [1, 1, 20, 40] : [2, 2, 10, 20];
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.src = texture;
     img.decode().then(() => {
       const ctx = canvas.getContext("2d")!;

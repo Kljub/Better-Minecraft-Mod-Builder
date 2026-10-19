@@ -65,3 +65,36 @@ test("Resources: upload images, create a folder, drag an image into it", async (
   await expect(panel.locator('[data-texture-key="custom/emerald.png"]')).toBeVisible();
   await expect(panel.locator('[data-texture-key="custom/ruby.png"]')).toHaveCount(0);
 });
+
+test("Resources: duplicate an image — the copy lands in the same folder", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, screen());
+  await openEditor(page);
+  await page.getByTitle("Resources", { exact: true }).click();
+  const panel = page.getByTestId("resources-panel");
+  await panel.getByTestId("resources-upload-input").setInputFiles([{ name: "ruby.png", mimeType: "image/png", buffer: fs.readFileSync(PNG) }]);
+  await panel.getByTitle("New folder").click();
+  await panel.getByPlaceholder("Folder name").fill("Gems");
+  await panel.getByPlaceholder("Folder name").press("Enter");
+  const gems = panel.locator('[data-folder="folder:Gems"]');
+  await panel.locator('[data-folder="all"]').click();
+  const ruby = panel.locator('[data-texture-key="custom/ruby.png"]');
+  await ruby.click();
+  await ruby.dragTo(gems);
+  await gems.click();
+  await panel.locator('[data-texture-key="custom/ruby.png"]').click();
+
+  await panel.getByRole("button", { name: "Duplicate" }).click();
+  await expect(panel.locator('[data-texture-key="custom/ruby_copy.png"]')).toBeVisible(); // in "Gems" too
+  await expect(gems).toContainText("2");
+  // Duplicating the original again doesn't clash.
+  await panel.locator('[data-texture-key="custom/ruby.png"]').click();
+  await panel.getByRole("button", { name: "Duplicate" }).click();
+  await expect(panel.locator('[data-texture-key="custom/ruby_copy_2.png"]')).toBeVisible();
+
+  // Also offered in "All categories" on right-click.
+  await page.getByTitle("All categories", { exact: true }).click();
+  await page.getByTestId("workspace-overview").getByText("ruby", { exact: true }).click({ button: "right" });
+  await page.getByTestId("workspace-context-menu").getByRole("menuitem", { name: "Duplicate" }).click();
+  await expect(page.getByText(/Duplicated as “ruby_copy_3”/)).toBeVisible();
+});

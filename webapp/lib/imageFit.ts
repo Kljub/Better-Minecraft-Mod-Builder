@@ -8,6 +8,7 @@
 
 async function loadImage(url: string): Promise<HTMLImageElement> {
   const img = new Image();
+  img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
   img.src = url;
   await img.decode();
   return img;

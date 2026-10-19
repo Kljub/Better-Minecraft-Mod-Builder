@@ -3,6 +3,7 @@ import type { PropField } from "./widgetRegistry";
 
 export const CREATIVE_TAB_OPTIONS: CreativeTabKey[] = [
   "custom",
+  "none",
   "BUILDING_BLOCKS",
   "COLORED_BLOCKS",
   "NATURAL_BLOCKS",
@@ -17,6 +18,7 @@ export const CREATIVE_TAB_OPTIONS: CreativeTabKey[] = [
 
 export const CREATIVE_TAB_LABELS: Record<CreativeTabKey, string> = {
   custom: "Eigener Mod-Tab",
+  none: "Keiner (nur per /give)",
   BUILDING_BLOCKS: "Building Blocks",
   COLORED_BLOCKS: "Colored Blocks",
   NATURAL_BLOCKS: "Natural Blocks",

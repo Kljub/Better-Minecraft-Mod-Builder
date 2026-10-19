@@ -95,7 +95,8 @@ export function duplicateSelection(model: EntityModel, sel: ModelSelection): { m
 export type GizmoResult =
   | { kind: "translate"; delta: Vec3 }
   | { kind: "rotate"; rotation: Vec3 }
-  | { kind: "scale"; scale: Vec3 };
+  | { kind: "scale"; scale: Vec3 }
+  | { kind: "resize"; axis: 0 | 1 | 2; side: 1 | -1; delta: number };
 
 /** Applies a finished gizmo drag. Translation/size snap to `snap` px, rotation to 0.01°. */
 export function applyGizmo(model: EntityModel, sel: NonNullable<ModelSelection>, result: GizmoResult, snap: number): EntityModel {
@@ -112,6 +113,15 @@ export function applyGizmo(model: EntityModel, sel: NonNullable<ModelSelection>,
     return updateCube(model, c.id, { from: add3(c.from, d), to: add3(c.to, d), origin: add3(c.origin, d) });
   }
   if (result.kind === "rotate") return updateCube(model, c.id, { rotation: rot(result.rotation) });
+  if (result.kind === "resize") {
+    // Only the dragged face moves: the max corner for side +1, the min corner for side -1.
+    const { axis, side, delta } = result;
+    const from = [...c.from] as Vec3, to = [...c.to] as Vec3;
+    const toIsMax = to[axis] >= from[axis];
+    const target = (side === 1) === toIsMax ? to : from;
+    target[axis] = Math.round((target[axis] + side * delta) * 1e4) / 1e4;
+    return updateCube(model, c.id, { from, to });
+  }
   // Scale about the cube's centre, size snapped (min one snap step, or 0 for planes on that axis).
   const size = cubeSize(c);
   const center: Vec3 = [(c.from[0] + c.to[0]) / 2, (c.from[1] + c.to[1]) / 2, (c.from[2] + c.to[2]) / 2];

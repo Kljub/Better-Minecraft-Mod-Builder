@@ -745,6 +745,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     if (!url) return;
     pushUndoSnapshot();
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => {
       const w = clampSize(img.naturalWidth || width);
       const h = clampSize(img.naturalHeight || height);
@@ -777,6 +778,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     const url = URL.createObjectURL(file);
     pushUndoSnapshot();
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => {
       // Unlike "Use existing as template" (which adopts the source's own size), an imported file
       // keeps the current canvas size and gets scaled to fit within it instead — down for a big

@@ -4,6 +4,7 @@ import React from "react";
 import { useTextures } from "@/lib/TextureContext";
 import type { ItemBlockDoc } from "@/components/ItemBlockPropertyPanel";
 import SteveViewer3D from "@/components/SteveViewer3D";
+import ChestViewer3D from "@/components/ChestViewer3D";
 
 interface Props {
   doc: ItemBlockDoc | null;
@@ -21,10 +22,13 @@ export default function ItemBlockPreview({ doc }: Props) {
   const { spec, kind } = doc;
   const url = spec.texture ? packTextures[spec.texture] : undefined;
   const isArmor = kind === "item" && spec.category === "armor";
+  const isChest = kind === "block" && spec.model === "chest";
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {isArmor ? (
+      {isChest ? (
+        <ChestViewer3D textureUrl={url} />
+      ) : isArmor ? (
         <div className="flex flex-col items-center gap-1">
           <SteveViewer3D armorSlot={spec.armorSlot ?? "chestplate"} textureUrl={url} />
           <span className="text-[10px] text-muted-foreground">Drag to rotate — fixed model, not editable</span>

@@ -259,6 +259,7 @@ export default function PropertyPanel({ widget, onUpdate, bindingsSchema, action
                             const url = packTextures[k];
                             if (url) {
                               const img = new Image();
+                              img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
                               img.onload = () => onUpdate({
                                 ...widget,
                                 props: { ...widget.props, [field.key]: k },

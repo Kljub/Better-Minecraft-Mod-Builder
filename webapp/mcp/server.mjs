@@ -115,6 +115,9 @@ httpServer.on("error", (err) => log(`bridge failed on 127.0.0.1:${PORT}: ${err.m
 httpServer.listen(PORT, "127.0.0.1", () => log(`bridge listening on http://127.0.0.1:${PORT}`));
 
 /** Runs a tool in the editor tab and resolves with its result. */
+/** Tools that take longer than CALL_TIMEOUT_MS in the editor (image generation runs ~40 s per image). */
+const LONG_TOOLS = { generate_image: 300_000, generate_item_skin: 300_000, generate_gui_texture: 300_000 };
+
 function callEditor(tool, args) {
   if (!connected()) {
     return Promise.reject(new Error(
@@ -123,7 +126,8 @@ function callEditor(tool, args) {
   }
   const id = randomUUID();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Editor didn't answer "${tool}" within ${CALL_TIMEOUT_MS / 1000}s.`)); }, CALL_TIMEOUT_MS);
+    const limit = LONG_TOOLS[tool] ?? CALL_TIMEOUT_MS;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Editor didn't answer "${tool}" within ${limit / 1000}s.`)); }, limit);
     pending.set(id, { resolve, reject, timer });
     queue.push({ id, tool, args: args ?? {} });
     deliver();
@@ -161,11 +165,54 @@ server.registerTool("get_guide", {
   annotations: { readOnlyHint: true },
 }, async ({ topic }) => text(GUIDES[topic ?? "modeling"]));
 
+forward("generate_image", "Create pictures with AI image generation (~40 s each): textures, icons, item/block art, concept art, logos… They're shown to the user in the chat, who decides whether to add them to the project's Resources (folder \"KI\"). Never claim an image was added — the user does that.", {
+  prompt: z.string().describe("what to draw, incl. style (e.g. 16×16 Minecraft pixel-art item texture, transparent background)"),
+  count: z.number().int().min(1).max(2).optional().describe("variants, default 1"),
+  name: z.string().regex(/^[a-z0-9_]+$/).optional().describe("file name suggestion, e.g. ruby_sword"),
+  assign_to: z.object({
+    collection: z.string().describe("built-in collection (items, blocks, …) or element kind"),
+    id: z.string(), field: z.string().optional().describe("texture field, default \"texture\""),
+  }).optional().describe("when the user adds the picture it also becomes this record's texture"),
+  size: z.number().int().min(8).max(512).optional().describe("scale to this square size when added — 16 for item/block textures"),
+});
+forward("generate_item_skin", "The editor's Item Skin Generator: a model trained on real Minecraft textures draws ready 16×16 item textures (mode item), tileable block textures (block), 64×64 armor layers (armor) or player skins (player). Best for item/block textures — prefer it over generate_image for those. Results are shown to the user in the chat for approval like generate_image.", {
+  prompt: z.string().describe("short English description, e.g. \"ruby sword\", \"mossy stone bricks\""),
+  mode: z.enum(["item", "block", "armor", "player"]).optional().describe("default item"),
+  count: z.number().int().min(1).max(4).optional().describe("variants to choose from, default 1"),
+  name: z.string().regex(/^[a-z0-9_]+$/).optional(),
+  assign_to: z.object({ collection: z.string(), id: z.string(), field: z.string().optional() }).optional()
+    .describe("when the user adds the picture it also becomes this record's texture"),
+});
+forward("generate_gui_texture", "The editor's Screen GUI Generator: a Minecraft-style GUI panel background (container / menu screen) at the given size, pixel-art look, no text. Shown to the user in the chat for approval like generate_image.", {
+  prompt: z.string().describe("style, e.g. \"dark oak wood with iron rivets\""),
+  width: z.number().int().min(16).max(512).optional().describe("pixels, default 350"),
+  height: z.number().int().min(16).max(512).optional().describe("pixels, default 200"),
+  count: z.number().int().min(1).max(2).optional(),
+  name: z.string().regex(/^[a-z0-9_]+$/).optional(),
+});
+forward("list_textures", "Search the textures the project can use: vanilla ones (\"item/diamond_sword.png\", \"block/stone.png\") and custom ones (\"custom/…\"). Set one as an item's/block's `texture` with update_record.", {
+  query: z.string().optional().describe("part of the name, e.g. sword, ruby, red"), limit: z.number().int().min(1).max(200).optional(),
+}, { readOnlyHint: true });
+
 forward("get_status", "Editor connection, project, Minecraft version, what is open, and how many elements each category has.", {}, { readOnlyHint: true });
 
 forward("list_elements", "List the project's elements of one kind (or all). Kinds: entityModel, damageType, enchantment, bannerPattern, painting, function, feature, and any other kind get_status lists.", {
   kind: z.string().optional(),
 }, { readOnlyHint: true });
+
+const COLLECTIONS = ["items", "blocks", "armors", "creativeTabs", "customAttributes", "effects", "potions", "achievements", "recipes", "trades", "lootEntries", "biomes", "dimensions"];
+forward("list_collections", "The editor's built-in content categories (items, blocks, armor, creative tabs, custom attributes, effects, potions, achievements, recipes, trades, loot, biomes, dimensions) with counts. These are NOT element kinds — use the *_record tools for them.", {}, { readOnlyHint: true });
+forward("describe_collection", "Fields of a built-in collection: an example record with every default, the editor's field list and notes (e.g. how attack damage works). Call before create_record.", {
+  collection: z.enum(COLLECTIONS),
+}, { readOnlyHint: true });
+forward("list_records", "All records of a built-in collection (full data).", { collection: z.enum(COLLECTIONS) }, { readOnlyHint: true });
+forward("create_record", "Create an item, block, recipe, … in a built-in collection. `record` is merged onto the defaults (see describe_collection); it opens in the editor.", {
+  collection: z.enum(COLLECTIONS), record: z.record(z.string(), z.unknown()).describe("fields incl. id (lowercase registry path)"),
+});
+forward("update_record", "Change fields of a built-in record (shallow merge).", {
+  collection: z.enum(COLLECTIONS), id: z.string(), changes: z.record(z.string(), z.unknown()),
+});
+forward("delete_record", "Delete a built-in record.", { collection: z.enum(COLLECTIONS), id: z.string() }, { destructiveHint: true });
 
 forward("list_element_kinds", "All element kinds with their editable fields (key, type, options) — use with create_element / update_element.", {}, { readOnlyHint: true });
 

@@ -66,8 +66,8 @@ public final class ArmorSpecs {
             DeferredRegister.Items register, Map<String, DeferredItem<Item>> result,
             ArmorSpec spec, ArmorMaterial material, ArmorType type, String piece, Rarity rarity) {
         String id = pieceId(spec, piece);
-        DeferredItem<Item> item = register.register(id, () ->
-            new Item(new Item.Properties().humanoidArmor(material, type).rarity(rarity)));
+        // registerItem sets the item id on the properties — 26.x's Item constructor requires it.
+        DeferredItem<Item> item = register.registerItem(id, Item::new, () -> new Item.Properties().humanoidArmor(material, type).rarity(rarity));
         result.put(id, item);
     }
 

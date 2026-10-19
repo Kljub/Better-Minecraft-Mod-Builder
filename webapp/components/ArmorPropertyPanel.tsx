@@ -1,12 +1,12 @@
 "use client";
 
 import React, { useState } from "react";
+import CreativeTabsField from "@/components/CreativeTabsField";
 import type { ArmorSpec, CreativeTabSpec, ItemSpec } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Field, NumInput, PropSelect, TextureField, ItemIdField } from "@/components/SchemaFields";
 import { VANILLA_ITEM_OPTIONS } from "@/lib/vanillaItems";
 import { ARMOR_MATERIAL_PRESETS, ARMOR_MATERIAL_PRESET_OPTIONS } from "@/lib/armorRegistry";
-import { CREATIVE_TAB_OPTIONS, CREATIVE_TAB_LABELS } from "@/lib/itemRegistry";
 import { useTextures } from "@/lib/TextureContext";
 import TexturePickerModal from "@/components/TexturePickerModal";
 
@@ -42,8 +42,6 @@ export default function ArmorPropertyPanel({ armor, items, creativeTabs, modId, 
   }
 
   const itemOptions = [...VANILLA_ITEM_OPTIONS, ...items.map((i) => `${modId}:${i.id}`)];
-  const creativeTabOptions = [...CREATIVE_TAB_OPTIONS, ...creativeTabs.map((t) => t.id)];
-  const creativeTabLabels = { ...CREATIVE_TAB_LABELS, ...Object.fromEntries(creativeTabs.map((t) => [t.id, t.displayName])) };
 
   const texField = (target: TexTarget) => (
     <Field label={TEX_LABELS[target]}>
@@ -137,7 +135,7 @@ export default function ArmorPropertyPanel({ armor, items, creativeTabs, modId, 
 
       <div className="col-span-2 font-semibold text-muted-foreground mt-1">Item Props</div>
       <Field label="Creative Tab">
-        <PropSelect value={armor.creativeTab} options={creativeTabOptions} labels={creativeTabLabels} onChange={(v) => onUpdate({ creativeTab: v })} />
+        <CreativeTabsField value={armor.creativeTab} extra={armor.extraCreativeTabs} creativeTabs={creativeTabs} onChange={(patch) => onUpdate(patch)} />
       </Field>
       <Field label="Rarity">
         <PropSelect value={armor.rarity} options={["common", "uncommon", "rare", "epic"]} onChange={(v) => onUpdate({ rarity: v as ArmorSpec["rarity"] })} />

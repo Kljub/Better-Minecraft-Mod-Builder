@@ -16,7 +16,13 @@ export type ViewPreset = "perspective" | "front" | "back" | "left" | "right" | "
 export type TransformResult =
   | { kind: "translate"; delta: Vec3 }
   | { kind: "rotate"; rotation: Vec3 }
-  | { kind: "scale"; scale: Vec3 };
+  | { kind: "scale"; scale: Vec3 }
+  /** one face of a cube moved outward by `delta` px (negative = inward) along its own `axis` */
+  | { kind: "resize"; axis: 0 | 1 | 2; side: 1 | -1; delta: number };
+
+/** How long a resize handle stays on a pixel step after snapping to it (the "lock"). */
+const RESIZE_LOCK_MS = 90;
+const AXIS_COLORS = [0xe0443e, 0x5fbf3f, 0x3f7fe0];
 
 export interface ModelViewportHandle {
   /** PNG data URL of the current view (rendered on demand, so no preserveDrawingBuffer cost). */
@@ -116,6 +122,39 @@ function buildModel(model: EntityModel, material: THREE.Material, hidden: THREE.
   return { root, bones, cubePivots, meshes };
 }
 
+/** Six face handles (in the cube pivot, so they follow the cube's rotation); faces of a flat axis get none. */
+function makeHandles(mesh: THREE.Mesh): THREE.Mesh[] {
+  const geo = mesh.geometry as THREE.BoxGeometry;
+  const dims = [geo.parameters.width, geo.parameters.height, geo.parameters.depth];
+  const handles: THREE.Mesh[] = [];
+  for (const axis of [0, 1, 2] as const) {
+    if (dims[axis] <= 0) continue;
+    for (const side of [1, -1] as const) {
+      const h = new THREE.Mesh(
+        new THREE.BoxGeometry(1.4, 1.4, 1.4),
+        new THREE.MeshBasicMaterial({ color: AXIS_COLORS[axis], depthTest: false, transparent: true, opacity: 0.95 }),
+      );
+      h.renderOrder = 4;
+      h.userData = { axis, side, mesh, resizeHandle: true };
+      mesh.parent!.add(h);
+      handles.push(h);
+    }
+  }
+  placeHandles(handles, mesh);
+  return handles;
+}
+
+/** Puts each handle just outside the centre of its face. */
+function placeHandles(handles: THREE.Mesh[], mesh: THREE.Mesh) {
+  const geo = mesh.geometry as THREE.BoxGeometry;
+  const dims = [geo.parameters.width * mesh.scale.x, geo.parameters.height * mesh.scale.y, geo.parameters.depth * mesh.scale.z];
+  for (const h of handles) {
+    const { axis, side } = h.userData as { axis: 0 | 1 | 2; side: 1 | -1 };
+    h.position.copy(mesh.position);
+    h.position.setComponent(axis, mesh.position.getComponent(axis) + side * (dims[axis] / 2 + 1.2));
+  }
+}
+
 function disposeTree(obj: THREE.Object3D) {
   obj.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -182,17 +221,24 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
   textureVersion?: number;
   /** "player": a see-through player body to model armor around (not pickable) */
   reference?: "player";
-}>(function ModelViewport({ model, textureUrl, selection, mode, snap, rotationSnap, onSelect, onTransformEnd, onContextMenu, onPaint, textureCanvas, textureVersion, reference }, ref) {
+  /** mode "scale" on a cube: one handle per face that moves only that face (instead of the
+   * symmetric scale gizmo) — the Design tab */
+  resizeHandles?: boolean;
+  /** a second click on the same cube/bone right after the first */
+  onDoubleSelect?: (sel: NonNullable<Selection>) => void;
+}>(function ModelViewport({ model, textureUrl, selection, mode, snap, rotationSnap, onSelect, onTransformEnd, onContextMenu, onPaint, textureCanvas, textureVersion, reference, resizeHandles, onDoubleSelect }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [gpu, setGpu] = useState<{ name: string; software: boolean } | null>(null);
   const three = useRef<{
     renderer: THREE.WebGLRenderer; scene: THREE.Scene; camera: THREE.PerspectiveCamera;
     orbit: OrbitControls; gizmo: TransformControls; material: THREE.MeshLambertMaterial; hidden: THREE.Material;
     built: Built | null; outline: THREE.LineSegments | null; requestRender: () => void;
+    /** resize handles of the selected cube (children of its pivot), see `resizeHandles` */
+    handles: THREE.Mesh[];
   } | null>(null);
   // Latest callbacks/props for the long-lived three.js event handlers.
-  const live = useRef({ onSelect, onTransformEnd, onContextMenu, onPaint, selection, model });
-  useEffect(() => { live.current = { onSelect, onTransformEnd, onContextMenu, onPaint, selection, model }; });
+  const live = useRef({ onSelect, onTransformEnd, onContextMenu, onPaint, onDoubleSelect, selection, model, snap });
+  useEffect(() => { live.current = { onSelect, onTransformEnd, onContextMenu, onPaint, onDoubleSelect, selection, model, snap }; });
   const poseRef = useRef<Map<string, BonePose> | null>(null);
 
   // ── one-time setup ──
@@ -283,7 +329,7 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
     // dragging opens the context menu (right-drag keeps panning the camera).
     const raycaster = new THREE.Raycaster();
     let downAt: [number, number, number] | null = null;
-    const pick = (e: PointerEvent): Selection => {
+    const pick = (e: MouseEvent): Selection => {
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
       raycaster.setFromCamera(ndc, camera);
@@ -303,12 +349,86 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
       const m = live.current.model;
       return [Math.min(m.textureWidth - 1, Math.max(0, Math.floor(hit.uv.x * m.textureWidth))), Math.min(m.textureHeight - 1, Math.max(0, Math.floor((1 - hit.uv.y) * m.textureHeight)))];
     };
-    const onPaintMove = (e: PointerEvent) => {
-      if (!painting) return;
-      const px = pixelAt(e);
-      if (px) live.current.onPaint?.(px, "move");
+    // Resize: drag a face handle along its axis; the size snaps to `snap` px and holds each step
+    // for RESIZE_LOCK_MS. Only that face moves — the opposite one stays where it is.
+    let resizing: {
+      handle: THREE.Mesh; mesh: THREE.Mesh; axis: 0 | 1 | 2; side: 1 | -1; origin: THREE.Vector3; dir: THREE.Vector3;
+      s0: number; scale: number; dim: number; base: number; pos0: number; shown: number; lockUntil: number;
+    } | null = null;
+    const rayAt = (e: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      raycaster.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+      return raycaster.ray;
+    };
+    /** position along the handle's axis line closest to the pointer ray (world units) */
+    const along = (origin: THREE.Vector3, dir: THREE.Vector3, e: PointerEvent) => {
+      const ray = rayAt(e);
+      const w0 = origin.clone().sub(ray.origin);
+      const b = dir.dot(ray.direction), denom = 1 - b * b;
+      if (denom < 1e-6) return null;
+      return (b * ray.direction.dot(w0) - dir.dot(w0)) / denom;
+    };
+    const handleAt = (e: PointerEvent) => {
+      const handles = three.current?.handles ?? [];
+      return handles.length ? (rayAt(e) && raycaster.intersectObjects(handles, false)[0]?.object as THREE.Mesh | undefined) : undefined;
+    };
+    const onMove = (e: PointerEvent) => {
+      if (resizing) {
+        const r = resizing;
+        const s1 = along(r.origin, r.dir, e);
+        if (s1 === null) return;
+        const step = live.current.snap > 0 ? live.current.snap : 0.25;
+        const minSize = Math.min(step, r.base);
+        const snapped = Math.max(minSize - r.base, Math.round((s1 - r.s0) / r.scale / step) * step);
+        const now = performance.now();
+        if (snapped === r.shown || now < r.lockUntil) return;
+        r.shown = snapped;
+        r.lockUntil = now + RESIZE_LOCK_MS;
+        const axisKey = (["x", "y", "z"] as const)[r.axis];
+        r.mesh.scale[axisKey] = (r.dim + snapped) / r.dim;
+        r.mesh.position[axisKey] = r.pos0 + r.side * snapped / 2;
+        placeHandles(three.current?.handles ?? [], r.mesh);
+        requestRender();
+        return;
+      }
+      if (painting) {
+        const px = pixelAt(e);
+        if (px) live.current.onPaint?.(px, "move");
+        return;
+      }
+      if (e.buttons === 0) {
+        const over = handleAt(e);
+        renderer.domElement.style.cursor = over ? "grab" : "";
+      }
     };
     const onDown = (e: PointerEvent) => {
+      if (e.button === 0) {
+        const handle = handleAt(e);
+        if (handle) {
+          const mesh = handle.userData.mesh as THREE.Mesh;
+          const { axis, side } = handle.userData as { axis: 0 | 1 | 2; side: 1 | -1 };
+          const geo = mesh.geometry as THREE.BoxGeometry;
+          const dim = [geo.parameters.width, geo.parameters.height, geo.parameters.depth][axis];
+          const origin = handle.getWorldPosition(new THREE.Vector3());
+          const q = mesh.getWorldQuaternion(new THREE.Quaternion());
+          const dir = new THREE.Vector3(axis === 0 ? side : 0, axis === 1 ? side : 0, axis === 2 ? side : 0).applyQuaternion(q).normalize();
+          const s0 = along(origin, dir, e);
+          if (s0 !== null) {
+            const c = live.current.model.cubes.find((x) => x.id === mesh.userData.cubeId);
+            resizing = {
+              handle, mesh, axis, side, origin, dir, s0, dim,
+              scale: mesh.parent!.getWorldScale(new THREE.Vector3()).x || 1,
+              base: c ? Math.abs(cubeSize(c)[axis]) : dim,
+              pos0: mesh.position.getComponent(axis), shown: 0, lockUntil: 0,
+            };
+            orbit.enabled = false;
+            renderer.domElement.style.cursor = "grabbing";
+            renderer.domElement.setPointerCapture(e.pointerId);
+            downAt = null;
+            return;
+          }
+        }
+      }
       downAt = [e.clientX, e.clientY, e.button];
       if (live.current.onPaint && e.button === 0) {
         const px = pixelAt(e);
@@ -321,6 +441,15 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
       }
     };
     const onUp = (e: PointerEvent) => {
+      if (resizing) {
+        const r = resizing;
+        resizing = null;
+        orbit.enabled = true;
+        renderer.domElement.style.cursor = "";
+        const sel = live.current.selection;
+        if (r.shown !== 0 && sel) live.current.onTransformEnd(sel, { kind: "resize", axis: r.axis, side: r.side, delta: r.shown });
+        return;
+      }
       if (painting) {
         painting = false;
         orbit.enabled = true;
@@ -340,11 +469,18 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
         live.current.onContextMenu(sel ?? live.current.selection, e.clientX, e.clientY);
       }
     };
+    // Double-click (the system's double-click timing) on a part: after the click that selected it.
+    const onDouble = (e: MouseEvent) => {
+      if (live.current.onPaint || gizmo.dragging) return;
+      const sel = pick(e);
+      if (sel) live.current.onDoubleSelect?.(sel);
+    };
     const noMenu = (e: Event) => e.preventDefault();
     renderer.domElement.addEventListener("pointerdown", onDown);
-    renderer.domElement.addEventListener("pointermove", onPaintMove);
+    renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("contextmenu", noMenu);
+    renderer.domElement.addEventListener("dblclick", onDouble);
 
     const resize = () => {
       const w = host.clientWidth || 1, h = host.clientHeight || 1;
@@ -359,14 +495,15 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
     ro.observe(host);
     resize();
 
-    three.current = { renderer, scene, camera, orbit, gizmo, material, hidden, built: null, outline: null, requestRender };
+    three.current = { renderer, scene, camera, orbit, gizmo, material, hidden, built: null, outline: null, requestRender, handles: [] };
     return () => {
       ro.disconnect();
       cancelAnimationFrame(frame);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
-      renderer.domElement.removeEventListener("pointermove", onPaintMove);
+      renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("contextmenu", noMenu);
+      renderer.domElement.removeEventListener("dblclick", onDouble);
       gizmo.detach();
       gizmo.dispose();
       orbit.dispose();
@@ -453,10 +590,17 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
       t.outline = null;
     }
     t.gizmo.detach();
+    for (const h of t.handles) { h.parent?.remove(h); h.geometry.dispose(); (h.material as THREE.Material).dispose(); }
+    t.handles = [];
     if (selection && !onPaint) {
       const target = selection.type === "cube" ? t.built.cubePivots.get(selection.id) : t.built.bones.get(selection.id);
+      const faceHandles = resizeHandles && mode === "scale" && selection.type === "cube";
+      if (target && faceHandles) {
+        const mesh = target.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
+        if (mesh) t.handles = makeHandles(mesh);
+      }
       if (target) {
-        t.gizmo.attach(target);
+        if (!faceHandles) t.gizmo.attach(target);
         const lineMat = new THREE.LineBasicMaterial({ color: selection.type === "cube" ? 0xf5b301 : 0x4fa3e0, depthTest: false, transparent: true });
         if (selection.type === "cube") {
           const mesh = target.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh | undefined;
@@ -481,7 +625,7 @@ const ModelViewport = forwardRef<ModelViewportHandle, {
       }
     }
     t.requestRender();
-  }, [selection, model, onPaint]);
+  }, [selection, model, onPaint, mode, resizeHandles]);
 
   // ── gizmo mode / snapping ──
   useEffect(() => {

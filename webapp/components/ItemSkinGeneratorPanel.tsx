@@ -40,6 +40,7 @@ let lastResults: GeneratedImage[] = [];
  * 16×16, and this keeps non-PNG or odd-sized uploads from tripping its input handling. */
 async function toSketchPng(url: string): Promise<string> {
   const img = new Image();
+  img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
   img.src = url;
   await img.decode();
   const c = document.createElement("canvas");

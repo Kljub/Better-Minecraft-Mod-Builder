@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Plus, Upload, Download, Search, Pencil, Copy, Trash2, Folder, FolderOpen, FolderPlus, FolderInput, Inbox, LayoutGrid, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,8 @@ export interface CategoryViewProps {
   onMove?: (from: number, to: number) => void;
   emptyHint?: string;
   folders?: CategoryFolders;
+  /** creates elements from files (e.g. structure .nbt files): header button, and files dropped on the grid */
+  fileUpload?: { label: string; accept: string; onFiles: (files: File[], folder?: string | null) => void };
 }
 
 type FolderView = { kind: "all" } | { kind: "none" } | { kind: "folder"; name: string };
@@ -57,8 +59,10 @@ const DRAG_MIME = "application/x-mc-category-index";
  * header with New / Import / Export all, tile grid with per-tile actions.
  * Click a tile to open it in its editor.
  */
-export default function CategoryView({ title, icon: Icon, entries, onNew, newLabel = "New", onImport, onExportAll, onMove, emptyHint, folders }: CategoryViewProps) {
+export default function CategoryView({ title, icon: Icon, entries, onNew, newLabel = "New", onImport, onExportAll, onMove, emptyHint, folders, fileUpload }: CategoryViewProps) {
   const [query, setQuery] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileDrop, setFileDrop] = useState(false);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const [view, setView] = useState<FolderView>({ kind: "all" });
   const [dropFolder, setDropFolder] = useState<string | null>(null);
@@ -140,6 +144,22 @@ export default function CategoryView({ title, icon: Icon, entries, onNew, newLab
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-7 w-44 pl-7 text-xs" />
         </div>
+        {fileUpload && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept={fileUpload.accept}
+              className="hidden"
+              data-testid="category-file-upload"
+              onChange={(ev) => { const files = [...(ev.target.files ?? [])]; ev.target.value = ""; if (files.length) fileUpload.onFiles(files, currentFolder); }}
+            />
+            <Button variant="secondary" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => fileInputRef.current?.click()} title={`${fileUpload.label} — or drop files here`}>
+              <Upload className="h-3.5 w-3.5" /> {fileUpload.label}
+            </Button>
+          </>
+        )}
         {onImport && (
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={onImport} title={`Import ${title}`}>
             <Upload className="h-3.5 w-3.5" /> Import
@@ -227,11 +247,22 @@ export default function CategoryView({ title, icon: Icon, entries, onNew, newLab
           <p className="mt-auto px-1 pt-2 text-[10px] leading-snug text-muted-foreground">Drag tiles onto a folder, or use the folder button on a tile.</p>
         </div>
       )}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div
+        className={`flex-1 overflow-y-auto p-3 ${fileDrop ? "bg-primary/10 ring-2 ring-inset ring-primary" : ""}`}
+        onDragOver={(ev) => { if (fileUpload && ev.dataTransfer.types.includes("Files")) { ev.preventDefault(); setFileDrop(true); } }}
+        onDragLeave={(ev) => { if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setFileDrop(false); }}
+        onDrop={(ev) => {
+          setFileDrop(false);
+          if (!fileUpload || !ev.dataTransfer.files.length) return;
+          ev.preventDefault();
+          fileUpload.onFiles([...ev.dataTransfer.files], currentFolder);
+        }}
+      >
         {entries.length === 0 ? (
           <div className="mt-16 flex flex-col items-center gap-3 text-center text-sm text-muted-foreground">
             <Icon className="h-8 w-8 opacity-50" />
             {emptyHint ?? `No ${title.toLowerCase()} yet.`}
+            {fileUpload && <span className="text-xs">Drop files here or use “{fileUpload.label}”.</span>}
             {onNew && (
               <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => onNew(currentFolder)}>
                 <Plus className="h-3.5 w-3.5" /> {newLabel}

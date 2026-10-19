@@ -1,6 +1,7 @@
 import { Terminal, Gavel, Droplets, BriefcaseBusiness, Sprout, Atom, Keyboard, Sailboat, Crosshair, Shirt, Castle, PackageOpen } from "lucide-react";
 import type { ElementKindDef, ElementSpec } from "./types";
 import { json, str, num, bool, list, opts, nameOf, textureFile, tagIf } from "./helpers";
+import { spawnEggPng } from "@/lib/png";
 
 /**
  * MCreator element types that need real Java registration — a datapack can't add a command or a
@@ -241,6 +242,14 @@ const VANILLA_POI_BLOCKS = new Set([
 const TRADE_ITEMS = ["minecraft:emerald", "minecraft:diamond", "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:wheat", "minecraft:paper"];
 
 interface InlineTrade { level: string; wants: string; wantsCount: number; gives: string; givesCount: number; maxUses: number; xp: number }
+interface WanderingTrade { pool: string; wants: string; wantsCount: number; gives: string; givesCount: number; maxUses: number; xp: number }
+
+/** "Village profession" elements are either a villager job or a custom wandering trader. */
+const isWandering = (s: ElementSpec) => str(s, "type") === "wandering";
+const isJob = (s: ElementSpec) => !isWandering(s);
+const WANDERING_POOLS = ["common", "rare", "buying"] as const;
+const tradeJson = (t: { wants: string; wantsCount: number; gives: string; givesCount: number; maxUses: number; xp: number }) =>
+  json({ gives: stack(t.gives, t.givesCount), wants: stack(t.wants, t.wantsCount), max_uses: Math.max(1, Math.round(t.maxUses)), xp: Math.max(0, Math.round(t.xp)) });
 
 const stack = (id: string, count: number) => (count > 1 ? { id, count: Math.min(99, Math.round(count)) } : { id });
 
@@ -257,29 +266,62 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
   icon: BriefcaseBusiness,
   idPrefix: "profession",
   description:
-    "A new villager job. Unemployed villagers take it when they find its job-site block, then offer the trades below as they level up (Novice → Master). The texture is the outfit drawn over the villager (64×64, like vanilla's profession textures).",
+    "A new villager job — unemployed villagers take it when they find its job-site block, then offer the trades below as they level up (Novice → Master); the texture is the outfit drawn over the villager. " +
+    "Or a custom wandering trader: it visits players now and then like vanilla's (with llamas), sells its own offers and leaves again.",
   labelField: "name",
   thumb: (spec) => str(spec, "texture") || undefined,
   defaults: () => ({
-    name: "", jobSiteBlock: "", workSound: "", texture: "", tradesPerLevel: 2, maxPerVillage: -1,
+    type: "job", name: "", jobSiteBlock: "", workSound: "", texture: "", tradesPerLevel: 2, maxPerVillage: -1,
+    commonOffers: 5, rareOffers: 1, buyingOffers: 2, spawnChance: 25, spawnIntervalMinutes: 20, stayMinutes: 40, llamas: 2,
+    spawnEgg: true, eggPrimary: "#3d5aa8", eggSecondary: "#c9a24a",
+    wanderingTrades: [{ pool: "common", wants: "minecraft:emerald", wantsCount: 1, gives: "minecraft:glowstone", givesCount: 1, maxUses: 12, xp: 1 }],
     trades: [{ level: "1", wants: "minecraft:emerald", wantsCount: 1, gives: "minecraft:bread", givesCount: 6, maxUses: 16, xp: 2 }],
   }),
   fields: [
+    {
+      key: "type", label: "Type", type: "select",
+      options: opts(["job", "wandering"], { job: "Villager job (job-site block, levels 1–5)", wandering: "Wandering trader (visits players, then leaves)" }),
+    },
     { key: "name", label: "Name (shown in the trade screen)", type: "text", half: true },
     {
-      key: "jobSiteBlock", label: "Job-site block", type: "registry", itemKind: "block", half: true, placeholder: "mymod:forge_table",
+      key: "jobSiteBlock", when: isJob, label: "Job-site block", type: "registry", itemKind: "block", half: true, placeholder: "mymod:forge_table",
       suggestions: (ctx) => ctx.projectBlocks,
       help: "Usually one of your own blocks — vanilla workstations (loom, lectern, …) already belong to a vanilla job.",
     },
-    { key: "workSound", label: "Work sound (optional)", type: "text", mono: true, placeholder: "minecraft:entity.villager.work_toolsmith", half: true },
-    { key: "tradesPerLevel", label: "Trades offered per level", type: "number", min: 1, max: 10, integer: true, half: true },
+    { key: "workSound", label: "Work sound (optional)", type: "text", mono: true, placeholder: "minecraft:entity.villager.work_toolsmith", half: true, when: isJob },
+    { key: "tradesPerLevel", label: "Trades offered per level", type: "number", min: 1, max: 10, integer: true, half: true, when: isJob },
     {
-      key: "maxPerVillage", label: "Max per village (-1 = unlimited, 0 = none)", type: "number", min: -1, max: 64, integer: true, half: true,
+      key: "maxPerVillage", when: isJob, label: "Max per village (-1 = unlimited, 0 = none)", type: "number", min: -1, max: 64, integer: true, half: true,
       help: "How many villagers of one village may have this job. Extra ones that haven't traded yet give it up again; villagers who already traded keep it, like in vanilla. 0 = unemployed villagers never take it.",
     },
-    { key: "texture", label: "Outfit texture (optional)", type: "texture" },
+    { key: "texture", label: "Outfit texture (optional)", type: "texture", when: isJob },
+    { key: "texture", label: "Trader texture (optional, 64×64 like wandering_trader.png)", type: "texture", when: isWandering },
+    { key: "spawnChance", label: "Spawn chance per try (%)", type: "number", min: 1, max: 100, integer: true, half: true, when: isWandering },
+    { key: "spawnIntervalMinutes", label: "Minutes between tries (vanilla 20)", type: "number", min: 1, max: 600, integer: true, half: true, when: isWandering },
+    { key: "stayMinutes", label: "Stays for (minutes, vanilla 40)", type: "number", min: 1, max: 600, integer: true, half: true, when: isWandering },
+    { key: "llamas", label: "Trader llamas", type: "number", min: 0, max: 4, integer: true, half: true, when: isWandering },
+    { key: "commonOffers", label: "Common offers per visit", type: "number", min: 0, max: 20, integer: true, half: true, when: isWandering },
+    { key: "rareOffers", label: "Rare offers per visit", type: "number", min: 0, max: 20, integer: true, half: true, when: isWandering },
+    { key: "buyingOffers", label: "Buying offers per visit", type: "number", min: 0, max: 20, integer: true, half: true, when: isWandering },
+    { key: "spawnEgg", label: "Spawn egg", type: "boolean", when: isWandering },
+    { key: "eggPrimary", label: "Egg colour", type: "color", half: true, when: (s) => isWandering(s) && s.spawnEgg !== false },
+    { key: "eggSecondary", label: "Egg spots", type: "color", half: true, when: (s) => isWandering(s) && s.spawnEgg !== false },
     {
-      key: "trades", label: "Trades", type: "list", itemLabel: "Trade",
+      key: "wanderingTrades", label: "Offers", type: "list", itemLabel: "Offer", when: isWandering,
+      help: "Each visit picks the set number of offers at random from each pool. \"Buying\" = the trader buys this from the player (gives emeralds).",
+      newItem: () => ({ pool: "common", wants: "minecraft:emerald", wantsCount: 1, gives: "minecraft:glowstone", givesCount: 1, maxUses: 12, xp: 1 }),
+      fields: [
+        { key: "pool", label: "Pool", type: "select", half: true, options: opts([...WANDERING_POOLS], { common: "Common", rare: "Rare", buying: "Buying" }) },
+        { key: "maxUses", label: "Max uses", type: "number", min: 1, integer: true, half: true },
+        { key: "wants", label: "Trader wants", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => [...TRADE_ITEMS, ...ctx.projectItems] },
+        { key: "wantsCount", label: "Count", type: "number", min: 1, max: 99, integer: true, half: true },
+        { key: "gives", label: "Trader gives", type: "registry", itemKind: "item", half: true, suggestions: (ctx) => [...ctx.projectItems, ...TRADE_ITEMS] },
+        { key: "givesCount", label: "Count", type: "number", min: 1, max: 99, integer: true, half: true },
+        { key: "xp", label: "XP", type: "number", min: 0, integer: true, half: true },
+      ],
+    },
+    {
+      key: "trades", label: "Trades", type: "list", itemLabel: "Trade", when: isJob,
       newItem: () => ({ level: "1", wants: "minecraft:emerald", wantsCount: 1, gives: "minecraft:bread", givesCount: 1, maxUses: 12, xp: 2 }),
       fields: [
         { key: "level", label: "Level", type: "select", half: true, options: opts(["1", "2", "3", "4", "5"], { "1": "1 Novice", "2": "2 Apprentice", "3": "3 Journeyman", "4": "4 Expert", "5": "5 Master" }) },
@@ -293,6 +335,13 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
     },
   ],
   validate: (spec) => {
+    if (isWandering(spec)) {
+      const offers = list<WanderingTrade>(spec, "wanderingTrades");
+      const problems: string[] = [];
+      if (!offers.length) problems.push("Add at least one offer.");
+      if (offers.some((t) => !t.wants || !t.gives)) problems.push("Every offer needs a wanted and a given item.");
+      return problems;
+    }
     const block = str(spec, "jobSiteBlock").trim();
     const problems: string[] = [];
     if (!block) problems.push("Pick a job-site block.");
@@ -304,6 +353,29 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
   },
   textures: (spec) => [str(spec, "texture")].filter(Boolean),
   files: (spec, { modId, texture }) => {
+    if (isWandering(spec)) {
+      // Offers → villager_trade entries, one tag + trade set per pool (<modid>:<id>/common|rare|buying),
+      // which the runtime's SpecWanderingTrader reads instead of vanilla's wandering_trader/* sets.
+      const offers = list<WanderingTrade>(spec, "wanderingTrades");
+      const files: { path: string; content: string | Blob }[] = offers.map((t, i) => ({ path: `data/${modId}/villager_trade/${spec.id}/${i + 1}.json`, content: tradeJson(t) }));
+      const amount: Record<string, number> = { common: num(spec, "commonOffers", 5), rare: num(spec, "rareOffers", 1), buying: num(spec, "buyingOffers", 2) };
+      for (const pool of WANDERING_POOLS) {
+        const values = offers.flatMap((t, i) => ((t.pool || "common") === pool ? [`${modId}:${spec.id}/${i + 1}`] : []));
+        files.push({ path: `data/${modId}/tags/villager_trade/${spec.id}/${pool}.json`, content: json({ values }) });
+        files.push({
+          path: `data/${modId}/trade_set/${spec.id}/${pool}.json`,
+          content: json({ amount: Math.max(0, Math.min(20, Math.round(amount[pool]))), random_sequence: `${modId}:trade_set/${spec.id}/${pool}`, trades: `#${modId}:${spec.id}/${pool}` }),
+        });
+      }
+      if (spec.spawnEgg !== false) {
+        const egg = `${spec.id}_spawn_egg`;
+        files.push({ path: `assets/${modId}/models/item/${egg}.json`, content: json({ parent: "minecraft:item/generated", textures: { layer0: `${modId}:item/${egg}` } }) });
+        files.push({ path: `assets/${modId}/items/${egg}.json`, content: json({ model: { type: "minecraft:model", model: `${modId}:item/${egg}` } }) });
+        const png = spawnEggPng(str(spec, "eggPrimary") || "#3d5aa8", str(spec, "eggSecondary") || "#c9a24a");
+        files.push({ path: `assets/${modId}/textures/item/${egg}.png`, content: new Blob([png as BlobPart], { type: "image/png" }) });
+      }
+      return [...files, ...textureFile(`assets/${modId}/textures/entity/wandering_trader/${spec.id}.png`, str(spec, "texture"), texture)];
+    }
     const trades = list<InlineTrade>(spec, "trades");
     const files = trades.map((t, i) => ({
       path: `data/${modId}/villager_trade/${spec.id}/${i + 1}.json`,
@@ -327,7 +399,23 @@ export const VILLAGER_PROFESSION: ElementKindDef = {
       ...textureFile(`assets/${modId}/textures/entity/zombie_villager/profession/${spec.id}.png`, str(spec, "texture"), texture),
     ];
   },
-  shared: (spec, { modId }) => ({
+  shared: (spec, { modId }) => isWandering(spec) ? {
+    lang: {
+      [`entity.${modId}.${spec.id}`]: nameOf(spec),
+      ...(spec.spawnEgg !== false ? { [`item.${modId}.${spec.id}_spawn_egg`]: `${nameOf(spec)} Spawn Egg` } : {}),
+    },
+    manifest: {
+      wandering_traders: {
+        id: spec.id, displayName: nameOf(spec),
+        texture: str(spec, "texture") ? `textures/entity/wandering_trader/${spec.id}.png` : "",
+        spawnChance: Math.round(num(spec, "spawnChance", 25)),
+        spawnDelay: Math.round(num(spec, "spawnIntervalMinutes", 20) * 1200),
+        despawnDelay: Math.round(num(spec, "stayMinutes", 40) * 1200),
+        llamas: Math.round(num(spec, "llamas", 2)),
+        spawnEgg: spec.spawnEgg !== false,
+      },
+    },
+  } : ({
     lang: { [`entity.${modId}.villager.${spec.id}`]: nameOf(spec) },
     // Limit 0: never an acquirable job site, so unemployed villagers don't even look for it.
     tags: tagIf(maxPerVillage(spec) !== 0, "data/minecraft/tags/point_of_interest_type/acquirable_job_site.json", `${modId}:${spec.id}`),

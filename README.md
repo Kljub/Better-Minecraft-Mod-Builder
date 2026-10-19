@@ -89,7 +89,9 @@ Export as JSON Lines, one model per line with the texture PNG as base64:
 - **All users' models:** `npm run dataset:export -- out.jsonl [--ai-only] [--deleted]` (for the server owner).
 - **Projects saved before the table existed:** `npm run dataset:backfill` adds their models.
 
-If other people use your server, tell them their models are collected.
+Codex Chat conversations are training data too: every turn is stored in `mmb_ai_chats` with the whole conversation up to and including it (`messages`, user/assistant) and the editor tool calls that answered it (`tools`), grouped by `conversation_id`. Without accounts the same lines go to `webapp/training-data/chat-turns.jsonl` (git-ignored). Export: `GET /api/dataset?type=chats` (your own) or `npm run dataset:export -- chats.jsonl --chats` (all users).
+
+If other people use your server, tell them their models and chat conversations are collected.
 
 The tables (`mmb_*`) are created on first use. Keep `MMB_SECRET_KEY` safe: without it, the stored tokens can't be decrypted, and you'd have to re-link the accounts. The AI routes (which run the Claude/Codex CLIs) still only work on the local dev server.
 

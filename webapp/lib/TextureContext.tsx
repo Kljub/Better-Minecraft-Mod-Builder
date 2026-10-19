@@ -42,6 +42,8 @@ interface TextureCtx {
   deleteCustomTexture: (key: string) => Promise<void>;
   /** Renames a custom texture (new filename stem, extension kept) — returns its new pack key. */
   renameCustomTexture: (key: string, newStem: string) => Promise<string>;
+  /** Copies a texture (custom or pack) to a new custom texture "<name>_copy" — returns its key. */
+  duplicateCustomTexture: (key: string) => Promise<string>;
   extractPack: (file: File) => Promise<ExtractResult>;
   reload: () => Promise<void>;
   reset: () => Promise<void>;
@@ -57,6 +59,7 @@ const Ctx = createContext<TextureCtx>({
   uploadCustomTexture: async () => "",
   deleteCustomTexture: async () => {},
   renameCustomTexture: async () => "",
+  duplicateCustomTexture: async () => "",
   extractPack: async () => ({ extracted: [], missing: [] }),
   reload: async () => {},
   reset: async () => {},
@@ -183,6 +186,20 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
     applyBlobs(await loadAllTextures());
   };
 
+  const duplicateCustomTexture = async (key: string): Promise<string> => {
+    const blobs = await loadAllTextures();
+    const blob = blobs[`pack:${key}`] ?? (packTextures[key] ? await (await fetch(packTextures[key])).blob() : undefined);
+    if (!blob) throw new Error(`Texture "${key}" isn't loaded in this browser.`);
+    const file = key.split("/").pop() ?? "texture.png";
+    const dot = file.lastIndexOf(".");
+    const stem = (dot > 0 ? file.slice(0, dot) : file).replace(/_copy(_\d+)?$/, "");
+    const ext = dot > 0 ? file.slice(dot) : ".png";
+    const newKey = freshCustomKey(`${stem}_copy`, ext);
+    await saveTexture(`pack:${newKey}`, blob);
+    applyBlobs(await loadAllTextures());
+    return newKey;
+  };
+
   const renameCustomTexture = async (key: string, newStem: string): Promise<string> => {
     if (!key.startsWith("custom/")) return key;
     const blobs = await loadAllTextures();
@@ -227,7 +244,7 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{
       textures, packTextures, ready, initialized, setupRequired, uploadFiles, uploadCustomTexture,
-      deleteCustomTexture, renameCustomTexture, extractPack: extractPackFn, reload, reset,
+      deleteCustomTexture, renameCustomTexture, duplicateCustomTexture, extractPack: extractPackFn, reload, reset,
     }}>
       {children}
     </Ctx.Provider>

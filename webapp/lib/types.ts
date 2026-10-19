@@ -69,8 +69,9 @@ export interface ScreenSpec {
 // auto-created per modId at runtime by neoforge-runtime that collects everything marked
 // "custom". Beyond these fixed keys, a project can also define its own named tabs (see
 // CreativeTabSpec below) — an item/block's `creativeTab` field is one of these keys, a
-// CreativeTabSpec's `id`, or "custom".
+// CreativeTabSpec's `id`, or "custom". "none": in no tab at all — only reachable with /give.
 export type CreativeTabKey =
+  | "none"
   | "BUILDING_BLOCKS"
   | "COLORED_BLOCKS"
   | "NATURAL_BLOCKS"
@@ -89,6 +90,9 @@ export interface CreativeTabSpec {
   /** registry name for the tab, e.g. "weapons" */
   id: string;
   displayName: string;
+  /** pack texture key of the tab's icon image (exported as a hidden icon item); "" or unset =
+   * the first item in the tab */
+  icon?: string;
 }
 
 export type AttributeOperation = "add_value" | "add_multiplied_base" | "add_multiplied_total";
@@ -148,8 +152,10 @@ export interface ItemSpec {
    * AttributeModifiers item component, not a scripted power system. Armor items get a sensible
    * default "generic.armor" entry seeded when category is switched to "armor". */
   attributes?: AttributeModifierSpec[];
-  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id */
+  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id ("none" = no tab, /give only) */
   creativeTab: string;
+  /** further tabs it also shows up in, besides `creativeTab` */
+  extraCreativeTabs?: string[];
   /** Only meaningful when durability > 0 — swaps the item's icon once it's been damaged past each
    * stage's threshold (0 = undamaged, 1 = about to break), e.g. a sword visually chipping/rusting
    * as it wears down. Real mechanism: this MC version's item model definitions support a
@@ -172,6 +178,10 @@ export interface BlockSpec {
    * still exports as a single cube_all model (parent "block/cube" only kicks in once at least
    * one face is overridden). */
   faceTextures?: Partial<Record<BlockFaceKey, string>>;
+  /** "cube" (default): a full block with `texture`/`faceTextures`. "chest": a working chest
+   * (27 slots, opening lid) — `texture` is then a 64×64 chest skin in the layout of vanilla
+   * entity/chest/normal.png; face textures are ignored. Chests stay single (no double chests). */
+  model?: "cube" | "chest";
   hardness: number;
   resistance: number;
   requiresTool: boolean;
@@ -180,8 +190,10 @@ export interface BlockSpec {
   soundType: "stone" | "wood" | "metal" | "gravel" | "grass" | "glass" | "wool" | "sand";
   /** whether to also register a BlockItem so the block can be held/placed */
   hasItem: boolean;
-  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id — only relevant when hasItem */
+  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id ("none" = no tab, /give only) — only relevant when hasItem */
   creativeTab: string;
+  /** further tabs it also shows up in, besides `creativeTab` */
+  extraCreativeTabs?: string[];
   appVersion?: string;
 }
 
@@ -492,8 +504,10 @@ export interface ArmorSpec {
   enchantmentValue: number;
   /** item id (vanilla or a project item) usable to repair this armor on an anvil */
   repairItem: string;
-  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id */
+  /** a CreativeTabKey, or a project-defined CreativeTabSpec's id ("none" = no tab, /give only) */
   creativeTab: string;
+  /** further tabs it also shows up in, besides `creativeTab` */
+  extraCreativeTabs?: string[];
   rarity: "common" | "uncommon" | "rare" | "epic";
   /** optional custom 3D model (ArmorModelAPI bone convention, see lib/model3d/armorModel.ts) —
    * replaces the flat vanilla armor layer; exported as geo/<id>.geo.json + the runtime's `customModel` */

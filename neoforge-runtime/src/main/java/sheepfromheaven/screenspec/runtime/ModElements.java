@@ -44,6 +44,8 @@ public final class ModElements {
         GameRuleSpecs.register(modId, modBus, load(modId, "game_rules", GameRuleSpec[].class));
         FluidSpecs.register(modId, modBus, load(modId, "fluids", FluidSpec[].class));
         ProfessionSpecs.register(modId, modBus, load(modId, "villager_professions", ProfessionSpec[].class));
+        sheepfromheaven.screenspec.runtime.wandering.WanderingTraderSpecs.register(modId, modBus,
+            load(modId, "wandering_traders", sheepfromheaven.screenspec.runtime.wandering.WanderingTraderSpec[].class));
         PlantSpecs.register(modId, modBus, load(modId, "plants", PlantSpec[].class));
         // Sounds first: other elements may refer to the sound events.
         sheepfromheaven.screenspec.runtime.sound.SoundSpecs.register(modId, modBus,

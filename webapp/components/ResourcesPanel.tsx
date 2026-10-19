@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Upload, FolderPlus, Folder, FolderOpen, Images, Inbox, Search, Pencil, Trash2, Download, Paintbrush, X,
+  Copy,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,7 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
   /** opens the Texture Editor on a blank canvas */
   onNewTexture: () => void;
 }) {
-  const { packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture } = useTextures();
+  const { packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture, duplicateCustomTexture } = useTextures();
   const { folders, assign } = useResourceFolders();
   const [view, setView] = useState<View>({ kind: "all" });
   const [query, setQuery] = useState("");
@@ -57,6 +58,7 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
   useEffect(() => {
     if (!focusKey) return;
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => setDims({ key: focusKey, w: img.naturalWidth, h: img.naturalHeight });
     img.src = packTextures[focusKey];
   }, [focusKey, packTextures]);
@@ -98,6 +100,22 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
     const newKey = await renameCustomTexture(key, next.trim());
     renameAssignedKey(key, newKey);
     setSelected([newKey]);
+  };
+
+  /** Copies each image ("<name>_copy") into the same folder and selects the copies. */
+  const duplicateImages = async (targets: string[]) => {
+    const copies: string[] = [];
+    try {
+      for (const k of targets) {
+        const copy = await duplicateCustomTexture(k);
+        const folder = folderOf(k);
+        if (folder) moveToFolder([copy], folder);
+        copies.push(copy);
+      }
+    } catch (err) {
+      toast.error(`Could not duplicate: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (copies.length) setSelected(copies);
   };
 
   const deleteImages = async (targets: string[]) => {
@@ -369,6 +387,9 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
                 </Button>
               </>
             )}
+            <Button variant="secondary" size="sm" className="h-7 justify-start gap-2 text-xs" onClick={() => void duplicateImages(liveSelected)}>
+              <Copy className="h-3.5 w-3.5" /> Duplicate{liveSelected.length > 1 ? ` ${liveSelected.length}` : ""}
+            </Button>
             <Button variant="destructive" size="sm" className="h-7 justify-start gap-2 text-xs" onClick={() => deleteImages(liveSelected)}>
               <Trash2 className="h-3.5 w-3.5" /> Delete{liveSelected.length > 1 ? ` ${liveSelected.length}` : ""}
             </Button>

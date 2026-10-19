@@ -50,8 +50,8 @@ public final class ItemSpecs {
             DeferredRegister.Items register, List<ItemSpec> specs, String modId, Map<String, Holder<Attribute>> customAttributes) {
         Map<String, DeferredItem<Item>> result = new LinkedHashMap<>();
         for (ItemSpec spec : specs) {
-            Item.Properties props = buildProperties(spec, modId, customAttributes);
-            DeferredItem<Item> item = register.register(spec.id, () -> new Item(props));
+            // registerItem sets the item id on the properties — 26.x's Item constructor requires it.
+            DeferredItem<Item> item = register.registerItem(spec.id, Item::new, () -> buildProperties(spec, modId, customAttributes));
             result.put(spec.id, item);
         }
         return result;

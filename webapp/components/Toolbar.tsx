@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square } from "lucide-react";
+import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import type { ScreenSpec, BindingsSchema } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import SettingsDialog from "@/components/SettingsDialog";
 import BindingsModal from "@/components/BindingsModal";
+import { chatProviderLabel, useChatProvider } from "@/lib/ai/chatStore";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 
 interface Props {
@@ -35,6 +36,9 @@ interface Props {
   onToggleTryMode: () => void;
   onScreenChange: (patch: Partial<ScreenSpec>) => void;
   onExportProject: () => void;
+  /** opens the Codex Chat / Claude Chat panel (editor header) */
+  onOpenChat?: () => void;
+  chatOpen?: boolean;
   onImportProject: () => void;
   onCopyJava: () => void;
   onResetTextures: () => Promise<void>;
@@ -51,10 +55,11 @@ interface Props {
 export default function Toolbar({
   screen, gridSize, showGrid, snapToParent, snapToSiblings, canUndo, canRedo, hasSelection, onCenterHorizontal, onCenterVertical, tryMode,
   onUndo, onRedo, onGridSizeChange, onToggleGrid, onToggleSnapToParent, onToggleSnapToSiblings, onToggleTryMode,
-  onScreenChange, onExportProject, onImportProject, onCopyJava, onResetTextures, onViewTextures, onExtractPack,
+  onScreenChange, onExportProject, onOpenChat, chatOpen, onImportProject, onCopyJava, onResetTextures, onViewTextures, onExtractPack,
   scale, onZoomIn, onZoomOut, onZoomReset, onSaveToTestMod,
   bindingsSchema, onUpdateBindingsSchema, actions, onUpdateActions, modId,
 }: Props) {
+  const chatProvider = useChatProvider();
   const SNAP_STEPS = [1, 2, 4, 8];
   const snapIdx = SNAP_STEPS.indexOf(gridSize);
   return (
@@ -166,6 +171,11 @@ export default function Toolbar({
         <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onImportProject} title="Import project (all screens)">
           <FolderUp className="h-4 w-4" />
         </Button>
+        {onOpenChat && (
+          <Button variant="ghost" size="sm" className={`h-7 gap-1 px-2 text-xs ${chatOpen ? "bg-accent text-primary" : ""}`} onClick={onOpenChat} title={`${chatProviderLabel(chatProvider)} — let the AI use the editor's features`} aria-pressed={!!chatOpen}>
+            <MessageSquare className="h-4 w-4" /> {chatProviderLabel(chatProvider)}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onExportProject} title="Export project (all screens)">
           <FolderDown className="h-4 w-4" />
         </Button>

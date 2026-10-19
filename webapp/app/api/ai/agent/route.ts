@@ -7,6 +7,7 @@ import { childEnv, guardRequest } from "../cli";
 import { registerAgentPort, unregisterAgentPort } from "@/lib/ai/bridgePorts";
 import { currentUser } from "@/lib/server/auth";
 import { finishAiRun, startAiRun } from "@/lib/server/modelDataset";
+import { recordChatTurn } from "@/lib/server/chatDataset";
 import { accountQueue, claudeQuota, isLimitError, markLimited, openAccount, recordQuota, type Quota, type RunAccount } from "@/lib/server/aiAccounts";
 
 /**
@@ -40,6 +41,25 @@ const SYSTEM = [
   "Every tool call is one undo step for the user. Finish with a short summary of what you built, in the user's language.",
 ].join(" ");
 
+/** Codex Chat (editor header): a general assistant for the whole editor, not just mobs. */
+const CHAT_SYSTEM = [
+  "You are the built-in assistant of MC Screen Designer, a web editor for Minecraft mods, open in the user's browser.",
+  "You can use every feature of the editor through the mc-designer MCP tools — and ONLY those: get_status / list_element_kinds / list_elements to look",
+  "at the project; list_collections / describe_collection / create_record / update_record for the BUILT-IN categories (items, blocks, armor,",
+  "creative tabs, custom attributes, effects, potions, achievements, recipes, trades, loot, biomes, dimensions); create_element / update_element /",
+  "open_element for the generic element kinds (enchantments, damage types, commands, fluids, structures, … — see list_element_kinds), and the entity model tools (create_model, add_bones, add_cubes, hold_item, paint_*, animations,",
+  "set_entity_settings, screenshot), and generate_image to draw pictures (textures, icons, concept art …) — those are shown to the user,",
+  "who decides whether to add them to the Resources (folder \"KI\"); never say an image was added yourself.",
+  "Items and blocks need a texture: draw one with generate_item_skin(prompt, assign_to {collection, id}) — the editor's Item Skin Generator,",
+  "made for 16×16 Minecraft textures (mode block for blocks) — or pick a fitting existing one (list_textures, then update_record texture).",
+  "A drawn texture becomes the record's texture once the user adds it. Never leave a new item/block without a texture.",
+  "For GUI/menu backgrounds use generate_gui_texture (the Screen GUI Generator).",
+  "You have no access to the editor's source code or to files — never try to read or change code.",
+  "Answer questions about the project and how to do things in the editor; when the user asks for changes, make them with the tools (call",
+  "list_element_kinds first to learn a kind's fields, get_guide before modelling mobs). Every tool call is one undo step for the user.",
+  "Reply in the user's language, short and concrete. The conversation so far is included above the latest message.",
+].join(" ");
+
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = createServer();
@@ -59,7 +79,7 @@ const short = (v: unknown, n = 120) => {
 export async function POST(request: Request) {
   const refused = guardRequest(request);
   if (refused) return refused;
-  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown; image?: unknown; images?: unknown };
+  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown; image?: unknown; images?: unknown; mode?: unknown; history?: unknown; conversationId?: unknown; projectKey?: unknown };
   try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
   const provider = body.provider;
   if (provider !== "claude" && provider !== "codex") {
@@ -68,6 +88,21 @@ export async function POST(request: Request) {
   const model = typeof body.model === "string" ? body.model.trim() : "";
   if (model && !/^[\w.:/[\]][\w.:/\-[\]]{0,127}$/.test(model)) return Response.json({ error: "Invalid model name" }, { status: 400 });
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 4000) : "";
+  const chat = body.mode === "chat";
+  const system = chat ? CHAT_SYSTEM : SYSTEM;
+  // Chat: earlier turns (user + assistant text) go in front of the new message — each run is fresh.
+  const turns = chat && Array.isArray(body.history)
+    ? body.history.slice(-20).flatMap((h) => {
+        const r = (h ?? {}) as { role?: unknown; text?: unknown };
+        return (r.role === "user" || r.role === "assistant") && typeof r.text === "string" && r.text.trim()
+          ? [{ role: r.role as "user" | "assistant", content: r.text.trim().slice(0, 4000) }] : [];
+      })
+    : [];
+  const history = turns.map((t) => `${t.role === "user" ? "User" : "You"}: ${t.content}`);
+  // Chat turns are kept as training data (lib/server/chatDataset) under this conversation id.
+  const conversationId = chat && typeof body.conversationId === "string" && /^[\w-]{1,64}$/.test(body.conversationId) ? body.conversationId : null;
+  const projectKey = typeof body.projectKey === "string" ? body.projectKey.slice(0, 128) : null;
+  const transcript = history.length ? `Conversation so far:\n${history.join("\n\n")}\n\n---\nLatest message from the user:\n` : "";
   if (!prompt) return Response.json({ error: "Empty prompt" }, { status: 400 });
   if (running) return Response.json({ error: "A generator run is already in progress." }, { status: 409 });
 
@@ -125,10 +160,10 @@ export async function POST(request: Request) {
       // terse "caveman" mode) must not leak into the product's agent. Login is unaffected.
       "-p", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--setting-sources", "",
       "--mcp-config", mcpConfig, "--strict-mcp-config", "--allowedTools", "mcp__mc-designer", "--tools", "",
-      "--append-system-prompt", SYSTEM,
+      "--append-system-prompt", system,
     ];
     if (model) args.push("--model", model);
-    stdin = prompt + active + imageNote;
+    stdin = transcript + prompt + active + imageNote;
     if (images.length) {
       // Images go in as user message content blocks (stream-json input), each after its label.
       args.push("--input-format", "stream-json");
@@ -150,6 +185,8 @@ export async function POST(request: Request) {
       // Only this server's tools are pre-approved (nobody can click "approve" in a headless run);
       // shell/file approvals and the read-only sandbox are unchanged.
       "-c", 'mcp_servers.mc-designer.default_tools_approval_mode="approve"',
+      // generate_image runs ~40 s per picture — above codex's 60 s default per MCP call.
+      "-c", "mcp_servers.mc-designer.tool_timeout_sec=300",
       "-c", 'approval_policy="never"',
     ];
     if (model) args.push("-m", model);
@@ -159,7 +196,7 @@ export async function POST(request: Request) {
       args.push("-i", file);
     }
     args.push("-");
-    stdin = `${SYSTEM}\n\n---\n\n${prompt}${active}${imageNote}`;
+    stdin = `${system}\n\n---\n\n${transcript}${prompt}${active}${imageNote}`;
   }
 
   // Linked accounts (Settings → AI): queue order, free quota first; empty = the host's own login.
@@ -174,7 +211,9 @@ export async function POST(request: Request) {
     start(controller) {
       let closed = false;
       let aborted = false;
+      let lastText = "";
       const emit = (ev: Record<string, unknown>) => {
+        if (ev.type === "text" && typeof ev.text === "string") lastText = ev.text;
         if (!closed) controller.enqueue(encoder.encode(JSON.stringify(ev) + "\n"));
       };
       const timer = setTimeout(() => { emit({ type: "text", text: "Time limit reached — stopping." }); running?.kill("SIGTERM"); }, TIMEOUT_MS);
@@ -183,6 +222,13 @@ export async function POST(request: Request) {
 
       const end = (ok: boolean, text: string) => {
         if (runId != null && user) void finishAiRun(runId, user.id, { ok, resultText: text, tools: toolLog }).catch(() => {});
+        if (conversationId) {
+          void recordChatTurn(user?.id ?? null, {
+            conversationId, provider, projectKey, runId,
+            messages: [...turns, { role: "user", content: prompt }, { role: "assistant", content: text.trim() || lastText }],
+            tools: toolLog, ok,
+          }).catch((e) => console.error("recording chat turn failed", e));
+        }
         clearTimeout(timer);
         running = null;
         unregisterAgentPort(port);
@@ -204,7 +250,7 @@ export async function POST(request: Request) {
         }
         if (account) emit({ type: "info", text: `Using ${provider} account "${account.label}"` });
         const runArgs = account && provider === "codex" ? args.filter((a) => a !== "--ephemeral") : args;
-        const child = spawn(provider, runArgs, { cwd: dir, env: { ...childEnv(), ...account?.env }, stdio: ["pipe", "pipe", "pipe"] });
+        const child = spawn(provider, runArgs, { cwd: dir, env: { ...childEnv(), MCP_TOOL_TIMEOUT: "300000", ...account?.env }, stdio: ["pipe", "pipe", "pipe"] });
         running = child;
         let finalText = "";
         let ok = false;

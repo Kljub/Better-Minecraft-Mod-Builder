@@ -86,6 +86,7 @@ export default function SkinPainter({ modelId, model, onChange }: {
     requestAnimationFrame(() => setHistorySize({ undo: 0, redo: 0 }));
     if (!textureUrl) { requestAnimationFrame(() => setVersion((v) => v + 1)); return; }
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => { ctx.clearRect(0, 0, W, H); ctx.drawImage(img, 0, 0, W, H); setVersion((v) => v + 1); };
     img.src = textureUrl;
   }, [modelId, model.texture, textureUrl, W, H]);
@@ -232,6 +233,7 @@ export default function SkinPainter({ modelId, model, onChange }: {
     snapshot();
     const blob = await paintCubes(model, { defaultColor: color, noise: 0.12 }, canvasRef.current?.toDataURL());
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => { ctx().clearRect(0, 0, W, H); ctx().drawImage(img, 0, 0); setVersion((v) => v + 1); scheduleSave(); };
     img.src = URL.createObjectURL(blob);
   };
@@ -257,6 +259,7 @@ export default function SkinPainter({ modelId, model, onChange }: {
     const url = URL.createObjectURL(blob);
     await new Promise<void>((resolve, reject) => {
       const img = new Image();
+      img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
       img.onload = () => { snapshot(); ctx().clearRect(0, 0, W, H); ctx().drawImage(img, 0, 0); setVersion((v) => v + 1); scheduleSave(); URL.revokeObjectURL(url); resolve(); };
       img.onerror = () => reject(new Error("Couldn't draw the painted texture."));
       img.src = url;
@@ -266,6 +269,7 @@ export default function SkinPainter({ modelId, model, onChange }: {
   const clearAll = () => { snapshot(); ctx().clearRect(0, 0, W, H); setVersion((v) => v + 1); scheduleSave(); };
   const importImage = (file: File) => {
     const img = new Image();
+    img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => { snapshot(); ctx().clearRect(0, 0, W, H); ctx().drawImage(img, 0, 0, W, H); setVersion((v) => v + 1); scheduleSave(); };
     img.src = URL.createObjectURL(file);
   };

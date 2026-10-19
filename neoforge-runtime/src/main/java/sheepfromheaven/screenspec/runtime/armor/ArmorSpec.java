@@ -35,6 +35,8 @@ public final class ArmorSpec {
     /** Vanilla item id (e.g. {@code "minecraft:iron_ingot"}) — becomes this armor's anvil repair tag. */
     public String repairItem = "minecraft:iron_ingot";
     public String creativeTab = "custom";
+    /** Further tabs besides {@link #creativeTab}; {@code creativeTab = "none"} puts it in no tab (only /give). */
+    public java.util.List<String> extraCreativeTabs;
     /** {@code "common" | "uncommon" | "rare" | "epic"} */
     public String rarity = "common";
     /**

@@ -35,4 +35,6 @@ public final class ItemSpec {
     public String armorSlot;
     public List<AttributeModifierSpec> attributes = Collections.emptyList();
     public String creativeTab = "custom";
+    /** Further tabs besides {@link #creativeTab}; {@code creativeTab = "none"} puts it in no tab (only /give). */
+    public java.util.List<String> extraCreativeTabs;
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import { isChestSkinKey } from "@/lib/chestModel";
+import CreativeTabsField from "@/components/CreativeTabsField";
 import type { ItemSpec, BlockSpec, BlockFaceKey, AttributeModifierSpec, CreativeTabSpec, CustomAttributeSpec } from "@/lib/types";
 import type { PropField } from "@/lib/widgetRegistry";
 import { useTextures } from "@/lib/TextureContext";
@@ -108,8 +110,30 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
         />
       </Field>
 
+      {block && (
+        <div className="col-span-2">
+          <Field label="Model">
+            <select
+              aria-label="Block model"
+              className="h-6 w-full rounded-sm border border-input bg-background px-1 text-xs"
+              value={block.model ?? "cube"}
+              onChange={(e) => set({ model: e.target.value })}
+            >
+              <option value="cube">Cube (full block)</option>
+              <option value="chest">Chest (texture = 64×64 chest skin)</option>
+            </select>
+          </Field>
+          {block.model === "chest" && (
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              Works like a vanilla chest (27 slots, opening lid). The texture uses the layout of
+              entity/chest/normal.png — pick a chest skin from the pack or paint your own.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="col-span-2">
-        <Field label="Texture">
+        <Field label={block?.model === "chest" ? "Chest skin" : "Texture"}>
           <div className="flex flex-col gap-1">
             <TextureField
               value={spec.texture}
@@ -131,7 +155,8 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
         packTextures={packTextures}
         current={spec.texture}
         onSelect={(k) => {
-          set({ texture: k });
+          // A chest skin (entity/chest/…) only fits the chest model — switch to it.
+          set(block && isChestSkinKey(k) ? { texture: k, model: "chest" } : { texture: k });
           setTexPickerOpen(false);
         }}
         onClose={() => setTexPickerOpen(false)}
@@ -149,6 +174,15 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
               <span className="text-muted-foreground">{field.label}</span>
               <Toggle checked={checked} onChange={(v) => set({ [field.key]: v })} />
             </div>
+          );
+        }
+
+        if (field.key === "creativeTab") {
+          return (
+            <Field key={field.key} label={field.label}>
+              <CreativeTabsField value={typeof raw === "string" ? raw : "custom"} extra={spec.extraCreativeTabs}
+                creativeTabs={creativeTabs} onChange={(patch) => set(patch)} />
+            </Field>
           );
         }
 
@@ -279,7 +313,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
         );
       })}
 
-      {block && (
+      {block && block.model !== "chest" && (
         <div className="col-span-2">
           <div className="font-semibold text-muted-foreground mt-1">Per-Face Textures</div>
           <p className="text-[10px] text-muted-foreground mb-1">

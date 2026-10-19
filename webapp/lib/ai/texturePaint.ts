@@ -40,6 +40,7 @@ function canvasFor(model: EntityModel): { canvas: HTMLCanvasElement; ctx: Canvas
 async function drawExisting(ctx: CanvasRenderingContext2D, url: string | undefined, model: EntityModel) {
   if (!url) return;
   const img = new Image();
+  img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
   img.src = url;
   await img.decode().catch(() => undefined);
   if (img.naturalWidth) ctx.drawImage(img, 0, 0, model.textureWidth, model.textureHeight);
