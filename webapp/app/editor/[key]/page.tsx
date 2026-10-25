@@ -67,7 +67,7 @@ import type {
 } from "@/lib/types";
 import { generateJavaClass } from "@/lib/generateJavaClass";
 import { getWidgetDef } from "@/lib/widgetRegistry";
-import { ITEM_DEFAULT, defaultCustomAttribute, suggestCustomAttributeId, slugifyId } from "@/lib/itemRegistry";
+import { ITEM_DEFAULT, defaultCustomAttribute, followCustomAttributeId, suggestCustomAttributeId, slugifyId } from "@/lib/itemRegistry";
 import { ARMOR_DEFAULT } from "@/lib/armorRegistry";
 import { BLOCK_DEFAULT } from "@/lib/blockRegistry";
 import { EFFECT_DEFAULT } from "@/lib/effectRegistry";
@@ -1052,8 +1052,8 @@ export default function EditorPage() {
   }, [entry, creativeTabs, commit]);
 
   // Bulk "export just this category" — a middle ground between exporting one single doc and the
-  // whole project (screens+items+blocks+... all together). Also used to seed new custom-attribute
-  // ids as "{project}_{displayname}" (see addCustomAttribute below).
+  // whole project (screens+items+blocks+... all together). Also used for the generated custom-attribute
+  // ids "{modid}_attribute_{displayname}" (see addCustomAttribute below).
   const friendlyModId = useCallback(() => {
     return (
       screens.find((s) => s.modId?.trim())?.modId?.trim() ||
@@ -1084,8 +1084,24 @@ export default function EditorPage() {
     commit({ ...entry, customAttributes: [...customAttributes, { ...defaultCustomAttribute(id), displayName }], activeAttributeIdx: customAttributes.length, activeDocType: "attribute" });
   }, [entry, customAttributes, commit, friendlyModId]);
 
-  /** Renames a custom attribute's id (not just its displayName) — the id is what items/effects
-   * actually reference in their attribute-modifier lists, so existing references are rewritten too. */
+  /** Applies `patch` to a custom attribute; a changed id is also rewritten in the items/effects whose
+   * attribute-modifier lists reference it (that's what they point at, not the display name). */
+  const patchCustomAttribute = useCallback((idx: number, patch: Partial<CustomAttributeSpec>) => {
+    const oldId = customAttributes[idx]?.id;
+    const id = patch.id ?? oldId;
+    const rewriteMods = (mods?: AttributeModifierSpec[]) =>
+      mods?.map((m) => m.attribute === oldId ? { ...m, attribute: id! } : m);
+    commit({
+      ...entry,
+      customAttributes: customAttributes.map((a, i) => i === idx ? { ...a, ...patch } : a),
+      ...(id !== oldId ? {
+        items: items.map((it) => it.attributes ? { ...it, attributes: rewriteMods(it.attributes) } : it),
+        effects: effects.map((ef) => ef.attributes ? { ...ef, attributes: rewriteMods(ef.attributes) } : ef),
+      } : {}),
+    });
+  }, [entry, customAttributes, items, effects, commit]);
+
+  /** Renames a custom attribute's id by hand — from then on it no longer follows the display name. */
   const renameCustomAttributeId = useCallback((idx: number, rawId: string) => {
     const oldId = customAttributes[idx]?.id;
     const id = slugifyId(rawId) || oldId;
@@ -1094,19 +1110,22 @@ export default function EditorPage() {
       alert(`Attribute id "${id}" is already in use.`);
       return;
     }
-    const rewriteMods = (mods?: AttributeModifierSpec[]) =>
-      mods?.map((m) => m.attribute === oldId ? { ...m, attribute: id } : m);
-    commit({
-      ...entry,
-      customAttributes: customAttributes.map((a, i) => i === idx ? { ...a, id } : a),
-      items: items.map((it) => it.attributes ? { ...it, attributes: rewriteMods(it.attributes) } : it),
-      effects: effects.map((ef) => ef.attributes ? { ...ef, attributes: rewriteMods(ef.attributes) } : ef),
-    });
-  }, [entry, customAttributes, items, effects, commit]);
+    patchCustomAttribute(idx, { id });
+  }, [customAttributes, patchCustomAttribute]);
 
+  /** A new display name carries the generated id "{modid}_attribute_{name}" along (see followCustomAttributeId). */
   const updateCustomAttribute = useCallback((idx: number, patch: Partial<CustomAttributeSpec>) => {
-    commit({ ...entry, customAttributes: customAttributes.map((a, i) => i === idx ? { ...a, ...patch } : a) });
-  }, [entry, customAttributes, commit]);
+    const attr = customAttributes[idx];
+    if (attr && patch.displayName !== undefined && patch.id === undefined) {
+      const base = followCustomAttributeId(friendlyModId(), attr.id, attr.displayName, patch.displayName);
+      if (base) {
+        let id = base;
+        for (let n = 2; customAttributes.some((a, i) => i !== idx && a.id === id); n++) id = `${base}_${n}`;
+        if (id !== attr.id) { patchCustomAttribute(idx, { ...patch, id }); return; }
+      }
+    }
+    patchCustomAttribute(idx, patch);
+  }, [customAttributes, friendlyModId, patchCustomAttribute]);
 
   const duplicateCustomAttribute = useCallback((idx: number) => {
     const original = customAttributes[idx];

@@ -17,8 +17,9 @@ interface Props {
 
 /**
  * Property form for the currently selected custom Attribute — same layout convention as
- * ItemBlockPropertyPanel. The ID is editable (suggested as "{project}_{displayname}" when created)
- * since items/effects reference it by id — renaming it here rewrites those references too.
+ * ItemBlockPropertyPanel. Only the display name needs typing: the ID follows it as
+ * "{modid}_attribute_{displayname}" (page.tsx updateCustomAttribute) until it's edited by hand;
+ * items/effects reference the id, and renaming it rewrites those references too.
  */
 export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRenameId, modId }: Props) {
   const [idInput, setIdInput] = useState(attribute?.id ?? "");
@@ -42,8 +43,16 @@ export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRe
     <div className="grid grid-cols-2 gap-x-3 gap-y-1 p-2 text-xs overflow-y-auto items-start">
       <div className="col-span-2 font-bold text-foreground mb-1 uppercase tracking-wide">Custom Attribute</div>
 
+      <Field label="Display Name">
+        <Input
+          className="h-6 text-xs px-1.5"
+          value={attribute.displayName}
+          onChange={(e) => onUpdate({ displayName: e.target.value })}
+        />
+      </Field>
+
       <Field label="ID">
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5" title="Set automatically from the display name as {modid}_attribute_{name}. Editing it by hand stops that.">
           {modId && <span className="shrink-0 font-mono text-muted-foreground" title="Namespace (your mod id)">{modId}:</span>}
           <Input
             className="h-6 text-xs px-1.5 font-mono"
@@ -53,14 +62,6 @@ export default function CustomAttributePropertyPanel({ attribute, onUpdate, onRe
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
           />
         </div>
-      </Field>
-
-      <Field label="Display Name">
-        <Input
-          className="h-6 text-xs px-1.5"
-          value={attribute.displayName}
-          onChange={(e) => onUpdate({ displayName: e.target.value })}
-        />
       </Field>
 
       <div className="col-span-2 grid grid-cols-3 gap-1">

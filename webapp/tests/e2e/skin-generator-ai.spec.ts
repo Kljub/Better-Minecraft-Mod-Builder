@@ -59,3 +59,31 @@ test("Item Skin Generator: the AI describes an uploaded picture, writes prompts 
   await panel.getByLabel("Hide bad").check();
   await expect(panel.getByTestId("skin-quality")).toHaveCount(1);
 });
+
+test("Item Skin Generator: Ctrl+V pastes a picture for the AI", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("mc-ui-builder:ai-settings", JSON.stringify({
+    clients: { claude: { enabled: true, model: "" }, codex: { enabled: false, model: "" }, ollama: { enabled: false, model: "" } }, preferred: "claude",
+  })));
+  const aiCalls: { task?: string; images?: unknown[] }[] = [];
+  await page.route("**/api/ai/generate", async (route) => {
+    aiCalls.push(route.request().postDataJSON());
+    await route.fulfill({ json: { description: "Ein Smaragd.", colors: ["#2ecc71"], prompts: ["emerald gem"] } });
+  });
+  await seedTextures(page);
+  await seedProject(page, { id: "main", width: 320, height: 180, widgets: [] });
+  await openEditor(page);
+  await page.getByTitle("Item Skin Generator", { exact: true }).click();
+  const panel = page.getByTestId("item-skin-generator");
+
+  const b64 = fs.readFileSync(PNG).toString("base64");
+  await page.evaluate((data) => {
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "clipboard.png", { type: "image/png" }));
+    document.body.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true }));
+  }, b64);
+  await expect(panel.getByAltText("Reference picture")).toBeVisible();
+  await expect(panel.getByTestId("skin-picture-description")).toContainText("Ein Smaragd.");
+  await expect(panel.getByPlaceholder("copper sword")).toHaveValue("emerald gem");
+  expect(aiCalls[0]).toMatchObject({ task: "skinDescribe" });
+});

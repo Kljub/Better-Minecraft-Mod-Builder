@@ -122,9 +122,23 @@ export function slugifyId(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-/** Default id suggestion for a new custom attribute, requested by the user as "{project}_{displayname lowercase}". */
+/** A custom attribute's id, generated from its display name: "{modid}_attribute_{displayname lowercase}". */
 export function suggestCustomAttributeId(modId: string, displayName: string): string {
   const project = slugifyId(modId) || "project";
-  const name = slugifyId(displayName) || "attribute";
-  return `${project}_${name}`;
+  const name = slugifyId(displayName) || "new";
+  return `${project}_attribute_${name}`;
+}
+
+/**
+ * The id a custom attribute gets when its display name changes from `prevName` to `nextName` —
+ * only while the id is still the generated one (also the older "{modid}_{name}" form, or either
+ * with a "_2" … suffix); null once it was renamed by hand. Uniqueness is up to the caller.
+ */
+export function followCustomAttributeId(modId: string, id: string, prevName: string, nextName: string): string | null {
+  const project = slugifyId(modId) || "project";
+  const prev = slugifyId(prevName);
+  const generated = [suggestCustomAttributeId(modId, prevName), ...(prev ? [`${project}_${prev}`] : [])];
+  if (!generated.some((g) => id === g || new RegExp(`^${g}_\\d+$`).test(id))) return null;
+  const next = suggestCustomAttributeId(modId, nextName);
+  return next === id ? null : next;
 }

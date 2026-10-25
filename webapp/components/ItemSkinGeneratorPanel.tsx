@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Wand2, Dices, ImagePlus, Loader2, X, ScanEye, ShieldCheck, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -214,6 +214,22 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   };
 
+  // Ctrl+V anywhere in the tab: a pasted image becomes the picture (text pastes are left alone).
+  const pasteRef = useRef<(f: File) => void>(() => {});
+  useEffect(() => {
+    pasteRef.current = (f) => { if (ai && mode !== "set" && !bannerMode) takePicture(f); };
+  });
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+      if (!file) return;
+      e.preventDefault();
+      pasteRef.current(file);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
+
   /** The AI rates results against their prompt (and the picture, if there is one). */
   const qualityCheck = async (imgs: GeneratedImage[]) => {
     if (!ai || !imgs.length) return;
@@ -316,7 +332,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
               ) : (
                 <>
                   <p className="text-[11px] leading-snug text-muted-foreground">
-                    Upload a picture — {aiClientLabel(ai)} describes it and writes the prompts{mode === "sketch" ? " (the uploaded base image counts too)" : ""}.
+                    Upload or paste (Ctrl+V) a picture — {aiClientLabel(ai)} describes it and writes the prompts{mode === "sketch" ? " (the uploaded base image counts too)" : ""}.
                   </p>
                   <div className="flex items-center gap-2">
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border" style={{ background: CHECKER }}>
