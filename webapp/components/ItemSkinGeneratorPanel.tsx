@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Wand2, Dices, ImagePlus, Loader2, X } from "lucide-react";
+import { Wand2, Dices, ImagePlus, Loader2, X, ScanEye, ShieldCheck, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import TexturePickerModal from "@/components/TexturePickerModal";
@@ -9,6 +9,9 @@ import { useTextures } from "@/lib/TextureContext";
 import SkinBackendControl, { loadSkinBackend, type SkinBackend } from "@/components/SkinBackendControl";
 import BannerPatternGenerator from "@/components/BannerPatternGenerator";
 import GeneratedResults, { CHECKER, SeedField, Slider, useSeed, type GeneratedImage, type Kind, type Target } from "@/components/GeneratedResults";
+import { referenceImage } from "@/components/EntityModelGeneratorPanel";
+import { aiClientLabel, aiGenerate, enabledAiClients, useAiSettings, type AiClientId } from "@/lib/aiSettings";
+import type { SkinDescription, SkinQuality, SkinRating } from "@/lib/ai/skinVision";
 
 type Mode = "text" | "sketch" | "set" | "player";
 
@@ -35,6 +38,26 @@ const DEFAULTS: Record<Mode, { prompt?: string; count: number; steps: number; gu
 const KIND_OF: Record<Mode, Kind> = { text: "item", sketch: "item", set: "item", player: "player" };
 // Session-wide, so leaving the tab and coming back keeps the last results.
 let lastResults: GeneratedImage[] = [];
+/** AI quality ratings per result id (session-wide like the results) */
+let lastRatings: Record<string, SkinRating & { best?: boolean }> = {};
+/** /api/ai/generate takes up to 8 images: the reference picture + up to 7 candidates per check */
+const CHECK_CHUNK = 7;
+
+/** A result enlarged with nearest-neighbour scaling, so the AI sees every texture pixel. */
+async function enlargedPng(dataUrl: string, size: number): Promise<string> {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.src = dataUrl;
+  await img.decode();
+  const scale = Math.max(1, Math.floor(256 / Math.max(img.naturalWidth, img.naturalHeight, size)));
+  const c = document.createElement("canvas");
+  c.width = img.naturalWidth * scale;
+  c.height = img.naturalHeight * scale;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL("image/png");
+}
 
 /** Draws any image onto a 256×256 PNG with nearest-neighbour scaling — the Space folds it back to
  * 16×16, and this keeps non-PNG or odd-sized uploads from tripping its input handling. */
@@ -72,6 +95,21 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
   onCreateBannerPattern?: (name: string, bannerTexture: string, shieldTexture: string) => void;
 }) {
   const { packTextures } = useTextures();
+  const aiSettings = useAiSettings();
+  const aiClients = enabledAiClients(aiSettings);
+  const [aiChoice, setAiChoice] = useState<AiClientId | null>(null);
+  /** Claude / Codex / Ollama for describing pictures and the quality check */
+  const ai: AiClientId | undefined = aiChoice && aiClients.includes(aiChoice) ? aiChoice
+    : aiSettings.preferred !== "all" && aiClients.includes(aiSettings.preferred) ? aiSettings.preferred : aiClients[0];
+  const [picture, setPicture] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [note, setNote] = useState("");
+  const [description, setDescription] = useState<SkinDescription | null>(null);
+  const [describing, setDescribing] = useState(false);
+  const [autoCheck, setAutoCheck] = useState(true);
+  const [checking, setChecking] = useState(false);
+  const [hideBad, setHideBad] = useState(false);
+  const [ratings, setRatingsState] = useState(lastRatings);
+  const setRatings = (fn: (r: typeof lastRatings) => typeof lastRatings) => setRatingsState((r) => (lastRatings = fn(r)));
   const [backend, setBackend] = useState<SkinBackend>(loadSkinBackend);
   const [mode, setMode] = useState<Mode>("text");
   const [bannerMode, setBannerMode] = useState(false);
@@ -106,13 +144,11 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
     if (d.strength !== undefined) setStrength(d.strength);
   };
 
-  const generate = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const sketch = needsBase && base ? await toSketchPng(base.url) : undefined;
-      if (needsBase && !sketch) throw new Error("Pick a base texture or upload an image first.");
-      const label = mode === "set" ? noun : prompt;
+  /** One generator run for `label` (the prompt; the item name in set mode); returns the new results. */
+  const generateOne = async (label: string): Promise<GeneratedImage[]> => {
+    const sketch = needsBase && base ? await toSketchPng(base.url) : undefined;
+    if (needsBase && !sketch) throw new Error("Pick a base texture or upload an image first.");
+    {
       const res = await fetch("/api/skin/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -124,8 +160,9 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       const data = (await res.json()) as { images?: { name: string; dataUrl: string }[]; error?: string };
       if (!res.ok || !data.images) throw new Error(data.error ?? `HTTP ${res.status}`);
       const mats = materials.split(/[,\n]/).map((m) => m.trim()).filter(Boolean);
+      const stamp = Date.now();
       const batch = data.images.map((im, i): GeneratedImage => ({
-        id: `${Date.now()}-${i}`,
+        id: `${stamp}-${Math.random().toString(36).slice(2, 6)}-${i}`,
         kind: KIND_OF[mode],
         size: mode === "player" ? 64 : 16,
         name: im.name,
@@ -133,17 +170,82 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
         prompt: mode === "set" ? `${mats[i] ?? ""} ${noun}`.trim() : label,
       }));
       setResults((r) => [...batch, ...r].slice(0, 64));
-      if (batch.length === 0) setError("The generator returned no images — try another seed.");
+      return batch;
+    }
+  };
+
+  /** Generates for each label in turn, then (if on) lets the AI rate what came out. */
+  const generate = async (labels: string[] = [mode === "set" ? noun : prompt]) => {
+    setBusy(true);
+    setError(null);
+    const made: GeneratedImage[] = [];
+    try {
+      for (const label of labels) made.push(...await generateOne(label));
+      if (made.length === 0) setError("The generator returned no images — try another seed.");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+    if (made.length && autoCheck && ai) await qualityCheck(made);
+  };
+
+  /** Claude / Codex describes the picture and writes prompts for the texture model. */
+  const describe = async (pic = picture) => {
+    if (!pic || !ai) return;
+    setDescribing(true);
+    setError(null);
+    try {
+      const d = await aiGenerate<SkinDescription>(ai, "skinDescribe", note.trim() || "-", { target: KIND_OF[mode] === "player" ? "player" : "item" },
+        [{ data: pic.dataUrl, label: "Reference picture" }]);
+      setDescription(d);
+      if (mode !== "set") setPrompt(d.prompts[0]);
+    } catch (e) {
+      setError(`${aiClientLabel(ai)}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDescribing(false);
+    }
+  };
+
+  const takePicture = (file: File | undefined) => {
+    if (!file) return;
+    void referenceImage(file)
+      .then((dataUrl) => { const pic = { name: file.name || "pasted image", dataUrl }; setPicture(pic); setDescription(null); void describe(pic); })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  };
+
+  /** The AI rates results against their prompt (and the picture, if there is one). */
+  const qualityCheck = async (imgs: GeneratedImage[]) => {
+    if (!ai || !imgs.length) return;
+    setChecking(true);
+    try {
+      for (let i = 0; i < imgs.length; i += CHECK_CHUNK) {
+        const chunk = imgs.slice(i, i + CHECK_CHUNK);
+        const target = chunk[0].kind === "player" ? "player" : "item";
+        const request = [...new Set(chunk.map((c) => c.prompt))].join(" / ") + (description ? `\nThe picture shows: ${description.description}` : "");
+        const images = [
+          ...(picture ? [{ data: picture.dataUrl, label: "Reference picture" }] : []),
+          ...await Promise.all(chunk.map(async (c, j) => ({ data: await enlargedPng(c.dataUrl, c.size), label: `Candidate ${j + 1}: ${c.prompt}` }))),
+        ];
+        const q = await aiGenerate<SkinQuality>(ai, "skinQuality", request, { target, hasReference: !!picture, count: chunk.length }, images);
+        setRatings((r) => {
+          const next = { ...r };
+          for (const rating of q.ratings) next[chunk[rating.index - 1].id] = { ...rating, best: q.best === rating.index };
+          return next;
+        });
+      }
+    } catch (e) {
+      setError(`Quality check (${aiClientLabel(ai)}): ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChecking(false);
     }
   };
 
   const uploadBase = (file: File | undefined) => {
     if (!file) return;
     setBase({ label: file.name, url: URL.createObjectURL(file) });
+    // An uploaded base is also the picture the AI describes and checks against.
+    if (ai && mode === "sketch") takePicture(file);
   };
 
   const modeHint = MODES.find((m) => m.id === mode)!.hint;
@@ -177,7 +279,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       <div className={`${bannerMode ? "hidden" : "flex"} flex-1 overflow-hidden`}>
         <form
           className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto border-r bg-sidebar p-3"
-          onSubmit={(e) => { e.preventDefault(); if (!busy) void generate(); }}
+          onSubmit={(e) => { e.preventDefault(); if (!busy && !checking) void generate(); }}
         >
           <div className="flex flex-wrap gap-0.5 rounded-sm border p-0.5">
             {MODES.map((m) => (
@@ -195,6 +297,83 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
 
           {localOnly && backend !== "local" && (
             <p className="rounded-sm border border-amber-500/50 bg-amber-500/10 p-2 text-[11px]">This mode only runs on the local backend — switch to &quot;Local GPU&quot; above.</p>
+          )}
+
+          {mode !== "set" && (
+            <div className="flex flex-col gap-1.5 rounded-sm border p-2" data-testid="skin-picture-ai">
+              <div className="flex items-center gap-1.5 text-xs">
+                <ScanEye className="h-3.5 w-3.5 text-primary" />
+                <span className="font-medium">From a picture (AI)</span>
+                {aiClients.length > 1 && (
+                  <select aria-label="AI for pictures" value={ai} onChange={(e) => setAiChoice(e.target.value as AiClientId)}
+                    className="ml-auto h-5 rounded-sm border border-input bg-transparent px-1 text-[10px] [&>option]:bg-popover">
+                    {aiClients.map((c) => <option key={c} value={c}>{aiClientLabel(c)}</option>)}
+                  </select>
+                )}
+              </div>
+              {!ai ? (
+                <p className="text-[11px] leading-snug text-muted-foreground">Turn on Claude Code or Codex in <b>Settings → AI</b> to describe pictures, write prompts and check quality.</p>
+              ) : (
+                <>
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    Upload a picture — {aiClientLabel(ai)} describes it and writes the prompts{mode === "sketch" ? " (the uploaded base image counts too)" : ""}.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border" style={{ background: CHECKER }}>
+                      {picture
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={picture.dataUrl} alt="Reference picture" className="h-12 w-12 object-contain" />
+                        : <ImagePlus className="h-5 w-5 text-muted-foreground" />}
+                    </div>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="truncate text-[11px]" title={picture?.name}>{picture?.name ?? "no picture"}</span>
+                      <div className="flex gap-1">
+                        <label className="inline-flex h-6 cursor-pointer items-center rounded-sm border px-2 text-[11px] hover:bg-accent">
+                          Upload picture
+                          <input type="file" accept="image/*" className="hidden" aria-label="Upload picture" onChange={(e) => { takePicture(e.target.files?.[0]); e.target.value = ""; }} />
+                        </label>
+                        {picture && (
+                          <Button type="button" variant="ghost" size="sm" className="h-6 w-6 p-0" title="Remove picture" onClick={() => { setPicture(null); setDescription(null); }}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for the AI (optional), e.g. only the sword" aria-label="Note for the AI" className="h-7 text-[11px]" />
+                  {picture && (
+                    <Button type="button" variant="outline" size="sm" className="h-6 gap-1 text-[11px]" disabled={describing} onClick={() => void describe()}>
+                      {describing ? <Loader2 className="h-3 w-3 animate-spin" /> : <ScanEye className="h-3 w-3" />}
+                      {describing ? `${aiClientLabel(ai)} is looking…` : description ? "Describe again" : "Describe picture"}
+                    </Button>
+                  )}
+                  {description && (
+                    <div className="flex flex-col gap-1.5" data-testid="skin-picture-description">
+                      <p className="text-[11px] leading-snug">{description.description}</p>
+                      {description.colors.length > 0 && (
+                        <div className="flex gap-1">
+                          {description.colors.map((c) => <span key={c} title={c} className="h-3.5 w-3.5 rounded-sm border" style={{ background: c }} />)}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1">
+                        {description.prompts.map((p) => (
+                          <button key={p} type="button" onClick={() => setPrompt(p)} title="Use this prompt"
+                            className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${prompt === p ? "border-primary text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                      {description.prompts.length > 1 && (
+                        <Button type="button" variant="secondary" size="sm" className="h-6 gap-1 text-[11px]" disabled={busy || checking || (localOnly && backend !== "local")}
+                          onClick={() => void generate(description.prompts)}>
+                          <Wand2 className="h-3 w-3" /> Generate all {description.prompts.length} prompts
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           )}
 
           {needsBase && (
@@ -263,10 +442,16 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
           <Slider label="Steps" value={steps} onChange={setSteps} min={10} max={mode === "player" ? 60 : 50} step={1} />
           <Slider label="Guidance (7–12 works, 3–5 goes mushy)" value={guidance} onChange={setGuidance} min={1} max={15} step={0.5} />
           <SeedField {...seedState} randomIcon={Dices} />
+          {ai && (
+            <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" title={`${aiClientLabel(ai)} rates every new result against the prompt and the picture`}>
+              <input type="checkbox" checked={autoCheck} onChange={(e) => setAutoCheck(e.target.checked)} className="accent-primary" />
+              Quality check after generating ({aiClientLabel(ai)})
+            </label>
+          )}
 
-          <Button type="submit" size="sm" className="h-8 gap-1.5 text-xs" disabled={busy || (localOnly && backend !== "local")}>
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-            {busy ? "Generating…" : mode === "set" ? "Generate set" : "Generate"}
+          <Button type="submit" size="sm" className="h-8 gap-1.5 text-xs" disabled={busy || checking || (localOnly && backend !== "local")}>
+            {busy || checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+            {busy ? "Generating…" : checking ? "Checking quality…" : mode === "set" ? "Generate set" : "Generate"}
           </Button>
           {error && <p className="rounded-sm border border-destructive/50 bg-destructive/10 p-2 text-[11px] text-destructive">{error}</p>}
 
@@ -280,13 +465,36 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
         </form>
 
         <GeneratedResults
-          results={results}
+          results={hideBad ? results.filter((r) => ratings[r.id]?.verdict !== "bad") : results}
           setResults={setResults}
           emptyIcon={Wand2}
           emptyText="Describe an item or a character and hit Generate."
           targetsFor={(kind) => (kind === "item" ? items : [])}
           onApply={(_, idx, key) => onApplyToItem(idx, key)}
           onOpen={(_, idx) => onOpenItem(idx)}
+          toolbar={ai && (
+            <>
+              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[11px]" disabled={busy || checking}
+                title={`${aiClientLabel(ai)} rates the results that have no rating yet`}
+                onClick={() => void qualityCheck(results.filter((r) => !ratings[r.id]).slice(0, 21))}>
+                {checking ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />} Check quality
+              </Button>
+              <label className="flex items-center gap-1 text-[11px]">
+                <input type="checkbox" checked={hideBad} onChange={(e) => setHideBad(e.target.checked)} className="accent-primary" /> Hide bad
+              </label>
+            </>
+          )}
+          badge={(img) => {
+            const q = ratings[img.id];
+            if (!q) return null;
+            const tone = q.verdict === "good" ? "text-green-600 dark:text-green-400" : q.verdict === "ok" ? "text-amber-600 dark:text-amber-400" : "text-destructive";
+            return (
+              <span className={`-mt-1 flex items-center gap-1 truncate text-[10px] ${tone}`} title={q.issues} data-testid="skin-quality">
+                {q.best && <Star className="h-3 w-3 shrink-0 fill-current" aria-label="Best" />}
+                {q.score}/10 · {q.verdict}{q.issues ? ` — ${q.issues}` : ""}
+              </span>
+            );
+          }}
         />
       </div>
 

@@ -443,6 +443,8 @@ export default function EditorPage() {
     | null
   >(null);
   const [textureEditorInitialKey, setTextureEditorInitialKey] = useState<string | null>(null);
+  /** Resources folder a texture painted from the Resources tab is filed into on save */
+  const [textureEditorFolder, setTextureEditorFolder] = useState<string | null>(null);
 
   useEffect(() => {
     setTemplates(loadTemplates());
@@ -1439,9 +1441,10 @@ export default function EditorPage() {
     });
   }, []);
 
-  const openTextureEditor = useCallback((returnTo?: { docType: "item" | "block" | "effect"; index: number } | { docType: "armor"; index: number; field: TexTarget }) => {
+  const openTextureEditor = useCallback((returnTo?: { docType: "item" | "block" | "effect"; index: number } | { docType: "armor"; index: number; field: TexTarget }, folder: string | null = null) => {
     setTextureEditorReturnTo(returnTo ?? null);
     setTextureEditorInitialKey(null);
+    setTextureEditorFolder(folder);
     setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeDocType: "texture" } : e));
   }, [cursor]);
 
@@ -1451,10 +1454,14 @@ export default function EditorPage() {
   const openExistingTexture = useCallback((key: string) => {
     setTextureEditorReturnTo(null);
     setTextureEditorInitialKey(key);
+    setTextureEditorFolder(null);
     setHistory(h => h.map((e, i) => i === cursor ? { ...e, activeDocType: "texture" } : e));
   }, [cursor]);
 
   const handleTextureEditorSave = useCallback((key: string) => {
+    // New from a Resources folder, or saved under a new name while editing one that's in a folder: same folder.
+    const folder = textureEditorFolder ?? (textureEditorInitialKey ? folderOfKey(textureEditorInitialKey) : null);
+    if (folder && folderOfKey(key) === null) moveToFolder([key], folder);
     if (!textureEditorReturnTo) return; // standalone use — texture is already saved as a pack texture
     const index = textureEditorReturnTo.index;
     if (textureEditorReturnTo.docType === "armor") {
@@ -1468,7 +1475,7 @@ export default function EditorPage() {
       commit({ ...entry, effects: effects.map((ef, i) => i === index ? { ...ef, icon: key } : ef), activeDocType: "effect", activeEffectIdx: index });
     }
     setTextureEditorReturnTo(null);
-  }, [textureEditorReturnTo, entry, items, blocks, armors, effects, commit]);
+  }, [textureEditorReturnTo, textureEditorFolder, textureEditorInitialKey, entry, items, blocks, armors, effects, commit]);
 
   const handleTextureEditorBack = useCallback(() => {
     const returnTo = textureEditorReturnTo;
@@ -2757,7 +2764,7 @@ export default function EditorPage() {
           ) : activeMainView === "resources" ? (
             <ResourcesPanel
               onEditTexture={(k) => { setMainView(null); openExistingTexture(k); }}
-              onNewTexture={() => { setMainView(null); openTextureEditor(); }}
+              onNewTexture={(folder) => { setMainView(null); openTextureEditor(undefined, folder); }}
             />
           ) : activeMainView === "skinGenerator" ? (
             <ItemSkinGeneratorPanel

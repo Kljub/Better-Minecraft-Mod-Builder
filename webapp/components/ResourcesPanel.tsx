@@ -20,6 +20,9 @@ type View = { kind: "all" } | { kind: "unsorted" } | { kind: "folder"; name: str
 const DRAG_MIME = "application/x-mc-texture-keys";
 
 const stemOf = (key: string) => key.replace(/^custom\//, "").replace(/\.[^./]+$/, "");
+/** Open folder, kept while the tab is closed — e.g. while painting a new texture for it. */
+let lastView: View = { kind: "all" };
+const rememberView = (v: View) => { lastView = v; };
 
 /**
  * MCreator-style Resources tab: upload images (button or drag & drop from the
@@ -29,12 +32,15 @@ const stemOf = (key: string) => key.replace(/^custom\//, "").replace(/\.[^./]+$/
  */
 export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
   onEditTexture: (key: string) => void;
-  /** opens the Texture Editor on a blank canvas */
-  onNewTexture: () => void;
+  /** opens the Texture Editor on a blank canvas; the texture is filed into `folder` when saved */
+  onNewTexture: (folder: string | null) => void;
 }) {
   const { packTextures, uploadCustomTexture, renameCustomTexture, deleteCustomTexture, duplicateCustomTexture } = useTextures();
   const { folders, assign } = useResourceFolders();
-  const [view, setView] = useState<View>({ kind: "all" });
+  const [viewState, setViewState] = useState<View>(lastView);
+  // The remembered folder may have been deleted or renamed meanwhile.
+  const view: View = viewState.kind === "folder" && !folders.includes(viewState.name) ? { kind: "all" } : viewState;
+  const setView = (v: View) => { rememberView(v); setViewState(v); };
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [newFolder, setNewFolder] = useState<string | null>(null);
@@ -269,7 +275,7 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-7 w-44 pl-7 text-xs" />
           </div>
-          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={onNewTexture} title="Paint a new texture in the Texture Editor">
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => onNewTexture(currentFolder)} title={`Paint a new texture in the Texture Editor${currentFolder ? ` — saved into “${currentFolder}”` : ""}`}>
             <Paintbrush className="h-3.5 w-3.5" /> New texture
           </Button>
           <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => fileInputRef.current?.click()} title="Upload images">

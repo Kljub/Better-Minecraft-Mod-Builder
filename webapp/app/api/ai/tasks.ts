@@ -3,6 +3,10 @@ import { ATTRIBUTE_OPTIONS, ATTRIBUTE_OPERATION_OPTIONS, EQUIPMENT_SLOT_OPTIONS 
 import { RIG_SCHEMA, RIG_SYSTEM, rigPrompt, validateAiRig, type RigAiContext } from "@/lib/model3d/aiRig";
 import { SKIN_SCHEMA, SKIN_SYSTEM, skinPrompt, validateAiSkin, type SkinAiContext } from "@/lib/model3d/aiSkin";
 import { ANIMATION_SCHEMA, ANIMATION_SYSTEM, animationPrompt, validateAiAnimation, type AnimationAiContext } from "@/lib/model3d/aiAnimation";
+import {
+  SKIN_DESCRIBE_SCHEMA, SKIN_QUALITY_SCHEMA, sanitizeSkinVisionContext, skinDescribePrompt, skinDescribeSystem, skinQualityPrompt,
+  skinQualitySystem, validateSkinDescription, validateSkinQuality,
+} from "@/lib/ai/skinVision";
 
 /**
  * AI tasks the editor can request. Each turns the user's free-text request plus editor context
@@ -110,6 +114,14 @@ export function buildTask(task: unknown, context: unknown): AiTask | null {
     case "animation": return { system: ANIMATION_SYSTEM, schema: ANIMATION_SCHEMA, validate: validateAiAnimation };
     case "skin": return { system: SKIN_SYSTEM, schema: SKIN_SCHEMA, validate: validateAiSkin };
     case "rig": return { system: RIG_SYSTEM, schema: RIG_SCHEMA, validate: validateAiRig };
+    case "skinDescribe": {
+      const c = sanitizeSkinVisionContext(context);
+      return { system: skinDescribeSystem(c.target), schema: SKIN_DESCRIBE_SCHEMA, validate: validateSkinDescription };
+    }
+    case "skinQuality": {
+      const c = sanitizeSkinVisionContext(context);
+      return { system: skinQualitySystem(c.target), schema: SKIN_QUALITY_SCHEMA, validate: (raw) => validateSkinQuality(raw, c.count ?? 1) };
+    }
     default: return null;
   }
 }
@@ -119,6 +131,8 @@ export function buildPrompt(task: string, prompt: string, context: unknown): str
   if (task === "animation") return animationPrompt(prompt, sanitizeAnimationContext(context));
   if (task === "skin") return skinPrompt(prompt, sanitizeSkinContext(context));
   if (task === "rig") return rigPrompt(prompt, sanitizeRigContext(context));
+  if (task === "skinDescribe") return skinDescribePrompt(prompt === "-" ? "" : prompt, sanitizeSkinVisionContext(context).target);
+  if (task === "skinQuality") return skinQualityPrompt(prompt, sanitizeSkinVisionContext(context));
   const c = (context ?? {}) as Partial<AttributesContext>;
   const about = [
     str(c.name) && `Name: ${str(c.name)}`,

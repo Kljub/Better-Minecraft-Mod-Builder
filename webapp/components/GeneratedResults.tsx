@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Save, Download, Check, ChevronLeft, ChevronRight, Grid3x3, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
@@ -80,7 +80,7 @@ export function SeedField({ seed, seedText, setSeedText, randomIcon: Icon }: Ret
  * Result grid + lightbox shared by the generator tabs: enlarge (blocks tiled, player skins in 3D),
  * save to Resources, download, and apply to a project item/block.
  */
-export default function GeneratedResults({ results, setResults, emptyIcon: EmptyIcon, emptyText, targetsFor, onApply, onOpen }: {
+export default function GeneratedResults({ results, setResults, emptyIcon: EmptyIcon, emptyText, targetsFor, onApply, onOpen, badge, toolbar }: {
   results: GeneratedImage[];
   setResults: (fn: (r: GeneratedImage[]) => GeneratedImage[]) => void;
   emptyIcon: LucideIcon;
@@ -89,6 +89,10 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
   targetsFor: (kind: Kind) => Target[];
   onApply: (kind: Kind, idx: number, textureKey: string, img: GeneratedImage) => void;
   onOpen: (kind: Kind, idx: number) => void;
+  /** extra line under a result's name (e.g. an AI quality rating) */
+  badge?: (img: GeneratedImage) => ReactNode;
+  /** extra controls in the results header */
+  toolbar?: ReactNode;
 }) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [applyTarget, setApplyTarget] = useState<string | null>(null);
@@ -163,6 +167,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
         <>
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
             {results.length} result{results.length === 1 ? "" : "s"}
+            {toolbar}
             <Button variant="ghost" size="sm" className="ml-auto h-6 px-2 text-[11px]" onClick={() => setResults(() => [])}>Clear</Button>
           </div>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-2">
@@ -187,6 +192,7 @@ export default function GeneratedResults({ results, setResults, emptyIcon: Empty
                   </button>
                   <span className="truncate text-xs" title={img.prompt}>{img.prompt}</span>
                   <span className="-mt-1 truncate text-[10px] text-muted-foreground" title={img.savedKey}>{sizeLabel(img)}{img.savedKey ? ` · ${img.savedKey}` : ""}</span>
+                  {badge?.(img)}
                   <div className="flex gap-1">
                     {img.kind === "player" ? (
                       <span className="flex-1" />
