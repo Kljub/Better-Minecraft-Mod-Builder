@@ -190,7 +190,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
     if (made.length && autoCheck && ai) await qualityCheck(made);
   };
 
-  /** Claude / Codex describes the picture and writes prompts for the texture model. */
+  /** Claude / Codex describes the picture and writes one prompt with all of it for the texture model. */
   const describe = async (pic = picture) => {
     if (!pic || !ai) return;
     setDescribing(true);
@@ -199,7 +199,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       const d = await aiGenerate<SkinDescription>(ai, "skinDescribe", note.trim() || "-", { target: KIND_OF[mode] === "player" ? "player" : "item" },
         [{ data: pic.dataUrl, label: "Reference picture" }]);
       setDescription(d);
-      if (mode !== "set") setPrompt(d.prompts[0]);
+      if (mode !== "set") setPrompt(d.prompt);
     } catch (e) {
       setError(`${aiClientLabel(ai)}: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -332,7 +332,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
               ) : (
                 <>
                   <p className="text-[11px] leading-snug text-muted-foreground">
-                    Upload or paste (Ctrl+V) a picture — {aiClientLabel(ai)} describes it and writes the prompts{mode === "sketch" ? " (the uploaded base image counts too)" : ""}.
+                    Upload or paste (Ctrl+V) a picture — {aiClientLabel(ai)} describes it and writes the prompt{mode === "sketch" ? " (the uploaded base image counts too)" : ""}.
                   </p>
                   <div className="flex items-center gap-2">
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm border" style={{ background: CHECKER }}>
@@ -371,18 +371,9 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
                           {description.colors.map((c) => <span key={c} title={c} className="h-3.5 w-3.5 rounded-sm border" style={{ background: c }} />)}
                         </div>
                       )}
-                      <div className="flex flex-wrap gap-1">
-                        {description.prompts.map((p) => (
-                          <button key={p} type="button" onClick={() => setPrompt(p)} title="Use this prompt"
-                            className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${prompt === p ? "border-primary text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
-                            {p}
-                          </button>
-                        ))}
-                      </div>
-                      {description.prompts.length > 1 && (
-                        <Button type="button" variant="secondary" size="sm" className="h-6 gap-1 text-[11px]" disabled={busy || checking || (localOnly && backend !== "local")}
-                          onClick={() => void generate(description.prompts)}>
-                          <Wand2 className="h-3 w-3" /> Generate all {description.prompts.length} prompts
+                      {prompt !== description.prompt && (
+                        <Button type="button" variant="ghost" size="sm" className="h-6 justify-start px-1 text-[11px]" title={description.prompt} onClick={() => setPrompt(description.prompt)}>
+                          Use the AI prompt again
                         </Button>
                       )}
                     </div>
@@ -440,7 +431,15 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
           ) : (
             <label className="flex flex-col gap-1 text-xs">
               <span className="text-muted-foreground">{mode === "player" ? "Character description (English)" : "Prompt (English, e.g. material + object)"}</span>
-              <Input value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="copper sword" className="h-7 text-xs" autoFocus />
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
+                placeholder="copper sword"
+                rows={prompt.length > 40 ? 3 : 1}
+                className="min-h-7 resize-y rounded-sm border border-input bg-transparent px-2 py-1 text-xs outline-none focus-visible:border-ring"
+                autoFocus
+              />
               {EXAMPLES[mode] && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {EXAMPLES[mode]!.map((ex) => (

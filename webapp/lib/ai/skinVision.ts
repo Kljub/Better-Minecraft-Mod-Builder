@@ -1,6 +1,6 @@
 /**
  * Item Skin Generator + Claude / Codex / Ollama vision: an uploaded picture is described and
- * turned into prompts for the texture model ("skinDescribe"), and generated textures are rated
+ * turned into one prompt for the texture model ("skinDescribe"), and generated textures are rated
  * against the request and the picture ("skinQuality"). Both run as structured tasks through
  * app/api/ai/generate; the answers are validated here, never trusted as-is.
  */
@@ -11,8 +11,8 @@ export interface SkinDescription {
   description: string;
   /** main colours as #rrggbb */
   colors: string[];
-  /** prompts for the texture model, best first */
-  prompts: string[];
+  /** the prompt for the texture model, with everything the picture shows */
+  prompt: string;
 }
 
 export interface SkinRating {
@@ -45,9 +45,9 @@ const clip = (v: unknown, n: number) => (typeof v === "string" ? v.trim().slice(
 const MODEL_NOTES: Record<SkinVisionTarget, string> = {
   item: [
     "The texture model is yuuki14202028/minecraft-item-16px, a Stable Diffusion fine-tune on 16×16 Minecraft item textures.",
-    "It works best with SHORT English prompts of the form \"<material/colour> <object>\", 2–6 words, e.g. \"copper sword\",",
-    "\"glowing molten iron sword\", \"emerald key\", \"gold skull\", \"blue potion bottle\". No sentences, no style words like",
-    "\"pixel art\", \"16x16\", \"minecraft\" or \"icon\" (the model adds those itself), no backgrounds, one object only.",
+    "Its prompts are English, \"<material/colour> <object>\" first (e.g. \"glowing molten iron sword\", \"emerald key\"), optionally followed",
+    "by comma-separated details. No full sentences, no style words like \"pixel art\", \"16x16\", \"minecraft\" or \"icon\" (the model",
+    "adds those itself), no backgrounds, one object only.",
   ].join(" "),
   player: [
     "The texture model is monadical-labs/minecraft-skin-generator-sdxl, which turns a short character description into a 64×64",
@@ -59,11 +59,11 @@ const MODEL_NOTES: Record<SkinVisionTarget, string> = {
 export const SKIN_DESCRIBE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["description", "colors", "prompts"],
+  required: ["description", "colors", "prompt"],
   properties: {
     description: { type: "string" },
     colors: { type: "array", items: { type: "string" } },
-    prompts: { type: "array", items: { type: "string" } },
+    prompt: { type: "string" },
   },
 } as const;
 
@@ -75,25 +75,23 @@ export function skinDescribeSystem(target: SkinVisionTarget): string {
     "  object/character, its shape and silhouette, materials, main colours, distinctive details. Write it in the language of the",
     "  user's note if there is one, otherwise English.",
     "- colors: the 2–6 main colours as #rrggbb.",
-    "- prompts: 3–6 prompts for the texture model (always English), best first. The first is the most faithful; the others",
-    "  vary the wording or material emphasis so the user gets different takes.",
+    "- prompt: ONE prompt for the texture model (always English) that carries all the information that matters for the look:",
+    "  object, material, main colours, shape and the distinctive details, as \"<material/colour> <object>, <detail>, <detail> …\",",
+    "  most important first, at most ~30 words.",
     MODEL_NOTES[target],
   ].join("\n");
 }
 
 export function skinDescribePrompt(note: string, target: SkinVisionTarget): string {
-  return `Make ${target === "player" ? "player skin" : "item texture"} prompts for the attached picture.${note ? `\nUser's note: ${note}` : ""}`;
+  return `Make the ${target === "player" ? "player skin" : "item texture"} prompt for the attached picture.${note ? `\nUser's note: ${note}` : ""}`;
 }
 
 export function validateSkinDescription(raw: unknown): SkinDescription {
   const r = (raw ?? {}) as Partial<Record<keyof SkinDescription, unknown>>;
-  const prompts = (Array.isArray(r.prompts) ? r.prompts : [])
-    .map((p) => clip(p, 120).replace(/\s+/g, " "))
-    .filter((p, i, all) => p && all.indexOf(p) === i)
-    .slice(0, 8);
-  if (!prompts.length) throw new Error("The AI answer contained no prompts");
+  const prompt = clip(r.prompt, 300).replace(/\s+/g, " ");
+  if (!prompt) throw new Error("The AI answer contained no prompt");
   const colors = (Array.isArray(r.colors) ? r.colors : []).filter((c): c is string => typeof c === "string" && HEX.test(c)).slice(0, 8);
-  return { description: clip(r.description, 1200), colors, prompts };
+  return { description: clip(r.description, 1200), colors, prompt };
 }
 
 export const SKIN_QUALITY_SCHEMA = {

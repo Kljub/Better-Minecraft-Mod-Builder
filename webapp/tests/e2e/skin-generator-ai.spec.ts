@@ -5,7 +5,7 @@ import { seedTextures, seedProject, openEditor } from "../support/seed";
 
 const PNG = path.join(__dirname, "../fixtures/real-textures/mc_button_normal.png");
 
-test("Item Skin Generator: the AI describes an uploaded picture, writes prompts and rates the results", async ({ page }) => {
+test("Item Skin Generator: the AI describes an uploaded picture, writes one prompt and rates the results", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("mc-ui-builder:ai-settings", JSON.stringify({
     clients: { claude: { enabled: false, model: "" }, codex: { enabled: true, model: "" }, ollama: { enabled: false, model: "" } }, preferred: "codex",
   })));
@@ -21,7 +21,7 @@ test("Item Skin Generator: the AI describes an uploaded picture, writes prompts 
     const body = route.request().postDataJSON();
     aiCalls.push(body);
     if (body.task === "skinDescribe") {
-      await route.fulfill({ json: { description: "Ein rotes Schwert mit goldenem Griff.", colors: ["#c0392b", "#f1c40f"], prompts: ["ruby sword", "red gold sword"] } });
+      await route.fulfill({ json: { description: "Ein rotes Schwert mit goldenem Griff.", colors: ["#c0392b", "#f1c40f"], prompt: "ruby sword, golden hilt, red blade with a lighter edge" } });
     } else {
       const n = body.context.count as number;
       await route.fulfill({ json: {
@@ -40,18 +40,18 @@ test("Item Skin Generator: the AI describes an uploaded picture, writes prompts 
   // Upload → Codex describes it and the first prompt lands in the prompt field.
   await panel.getByLabel("Upload picture").setInputFiles(PNG);
   await expect(panel.getByTestId("skin-picture-description")).toContainText("Ein rotes Schwert mit goldenem Griff.");
-  await expect(panel.getByPlaceholder("copper sword")).toHaveValue("ruby sword");
+  await expect(panel.getByPlaceholder("copper sword")).toHaveValue("ruby sword, golden hilt, red blade with a lighter edge");
   expect(aiCalls[0]).toMatchObject({ provider: "codex", task: "skinDescribe", context: { target: "item" } });
   expect(aiCalls[0].images).toHaveLength(1);
 
-  // All prompts are generated, then the quality check rates every result against the picture.
-  await panel.getByRole("button", { name: "Generate all 2 prompts" }).click();
-  await expect(panel.getByTestId("skin-quality")).toHaveCount(4);
-  expect(skinCalls.map((c) => c.prompt)).toEqual(["ruby sword", "red gold sword"]);
+  // One prompt with everything; generate, then the quality check rates the results against the picture.
+  await panel.getByRole("button", { name: "Generate", exact: true }).click();
+  await expect(panel.getByTestId("skin-quality")).toHaveCount(2);
+  expect(skinCalls.map((c) => c.prompt)).toEqual(["ruby sword, golden hilt, red blade with a lighter edge"]);
   const check = aiCalls.find((c) => c.task === "skinQuality")!;
-  expect(check.context).toMatchObject({ target: "item", hasReference: true, count: 4 });
+  expect(check.context).toMatchObject({ target: "item", hasReference: true, count: 2 });
   expect(check.images![0].label).toBe("Reference picture");
-  expect(check.images).toHaveLength(5);
+  expect(check.images).toHaveLength(3);
   await expect(panel.getByTestId("skin-quality").filter({ hasText: "8/10 · good — sauber" })).toHaveCount(1);
   await expect(panel.getByLabel("Best")).toHaveCount(1);
 
@@ -67,7 +67,7 @@ test("Item Skin Generator: Ctrl+V pastes a picture for the AI", async ({ page })
   const aiCalls: { task?: string; images?: unknown[] }[] = [];
   await page.route("**/api/ai/generate", async (route) => {
     aiCalls.push(route.request().postDataJSON());
-    await route.fulfill({ json: { description: "Ein Smaragd.", colors: ["#2ecc71"], prompts: ["emerald gem"] } });
+    await route.fulfill({ json: { description: "Ein Smaragd.", colors: ["#2ecc71"], prompt: "emerald gem" } });
   });
   await seedTextures(page);
   await seedProject(page, { id: "main", width: 320, height: 180, widgets: [] });

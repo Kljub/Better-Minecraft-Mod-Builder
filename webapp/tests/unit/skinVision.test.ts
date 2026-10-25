@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { validateSkinDescription, validateSkinQuality } from "../../lib/ai/skinVision";
 
 describe("skin vision answers", () => {
-  it("keeps unique prompts and valid colours", () => {
-    const d = validateSkinDescription({ description: "x", colors: ["#ff0000", "red"], prompts: ["ruby sword", "ruby sword", "  red   blade ", ""] });
-    expect(d.prompts).toEqual(["ruby sword", "red blade"]);
+  it("keeps one prompt and valid colours", () => {
+    const d = validateSkinDescription({ description: "x", colors: ["#ff0000", "red"], prompt: "  ruby   sword, golden hilt " });
+    expect(d.prompt).toBe("ruby sword, golden hilt");
     expect(d.colors).toEqual(["#ff0000"]);
-    expect(() => validateSkinDescription({ prompts: [] })).toThrow();
+    expect(() => validateSkinDescription({ prompt: "" })).toThrow();
   });
 
   it("drops out-of-range and duplicate ratings, clamps scores", () => {
