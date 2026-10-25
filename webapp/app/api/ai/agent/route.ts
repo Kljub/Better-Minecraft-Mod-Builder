@@ -41,7 +41,7 @@ const SYSTEM = [
   "Every tool call is one undo step for the user. Finish with a short summary of what you built, in the user's language.",
 ].join(" ");
 
-/** Codex Chat (editor header): a general assistant for the whole editor, not just mobs. */
+/** AI Builder tab: a general assistant for the whole editor, not just mobs. */
 const CHAT_SYSTEM = [
   "You are the built-in assistant of MC Screen Designer, a web editor for Minecraft mods, open in the user's browser.",
   "You can use every feature of the editor through the mc-designer MCP tools — and ONLY those: get_status / list_element_kinds / list_elements to look",
@@ -57,7 +57,20 @@ const CHAT_SYSTEM = [
   "You have no access to the editor's source code or to files — never try to read or change code.",
   "Answer questions about the project and how to do things in the editor; when the user asks for changes, make them with the tools (call",
   "list_element_kinds first to learn a kind's fields, get_guide before modelling mobs). Every tool call is one undo step for the user.",
-  "Reply in the user's language, short and concrete. The conversation so far is included above the latest message.",
+  "When the user describes something to build, build ALL of it exactly as described — every name, number, colour, behaviour, recipe, drop",
+  "and texture they mention. Detailed briefs are the spec: first make a short plan of every part (and what they depend on: textures,",
+  "recipes, loot, tags, creative tab …), then build it part by part, then check the result (list_elements / get_status, screenshots for",
+  "models) and fix what's missing or wrong. Where the brief leaves something open, pick a sensible Minecraft-style default and say so.",
+  "Mobs/creatures: you have the full Entity Model Generator workflow — create_model with a fitting template, add_bones/add_cubes, pack_uv,",
+  "paint_cubes, screenshot and fix, animations (create_animation + add_keyframes or generate_animation), set_entity_settings (health,",
+  "speed, damage, hostile or not, spawning). Animation sign: in this editor rotation +X swings a hanging arm FORWARD (opposite of vanilla",
+  "Java's xRot and of Bedrock files) — attacks and raised arms use POSITIVE X; read the \"motion\" field add_keyframes returns and fix any limb",
+  "that moves the wrong way. Held items (weapons, tools, staffs, shields): build the item as its own bone, then ALWAYS call",
+  "hold_item(model, item, hand, direction) — never position held items yourself.",
+  "Earlier conversations of this project may be listed for reference: use them when the user refers to earlier work, and check the",
+  "project with the tools before relying on them (the user may have changed things since).",
+  "Reply in the user's language, concrete. End a build with a short checklist of what you created or changed.",
+  "The conversation so far is included above the latest message.",
 ].join(" ");
 
 function freePort(): Promise<number> {
@@ -79,7 +92,7 @@ const short = (v: unknown, n = 120) => {
 export async function POST(request: Request) {
   const refused = guardRequest(request);
   if (refused) return refused;
-  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown; image?: unknown; images?: unknown; mode?: unknown; history?: unknown; conversationId?: unknown; projectKey?: unknown };
+  let body: { provider?: unknown; model?: unknown; prompt?: unknown; context?: unknown; image?: unknown; images?: unknown; mode?: unknown; history?: unknown; memory?: unknown; conversationId?: unknown; projectKey?: unknown };
   try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
   const provider = body.provider;
   if (provider !== "claude" && provider !== "codex") {
@@ -87,22 +100,26 @@ export async function POST(request: Request) {
   }
   const model = typeof body.model === "string" ? body.model.trim() : "";
   if (model && !/^[\w.:/[\]][\w.:/\-[\]]{0,127}$/.test(model)) return Response.json({ error: "Invalid model name" }, { status: 400 });
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 4000) : "";
   const chat = body.mode === "chat";
+  // AI Builder briefs can be long and detailed.
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, chat ? 16_000 : 4000) : "";
   const system = chat ? CHAT_SYSTEM : SYSTEM;
   // Chat: earlier turns (user + assistant text) go in front of the new message — each run is fresh.
   const turns = chat && Array.isArray(body.history)
-    ? body.history.slice(-20).flatMap((h) => {
+    ? body.history.slice(-40).flatMap((h) => {
         const r = (h ?? {}) as { role?: unknown; text?: unknown };
         return (r.role === "user" || r.role === "assistant") && typeof r.text === "string" && r.text.trim()
-          ? [{ role: r.role as "user" | "assistant", content: r.text.trim().slice(0, 4000) }] : [];
+          ? [{ role: r.role as "user" | "assistant", content: r.text.trim().slice(0, 8000) }] : [];
       })
     : [];
   const history = turns.map((t) => `${t.role === "user" ? "User" : "You"}: ${t.content}`);
   // Chat turns are kept as training data (lib/server/chatDataset) under this conversation id.
   const conversationId = chat && typeof body.conversationId === "string" && /^[\w-]{1,64}$/.test(body.conversationId) ? body.conversationId : null;
   const projectKey = typeof body.projectKey === "string" ? body.projectKey.slice(0, 128) : null;
-  const transcript = history.length ? `Conversation so far:\n${history.join("\n\n")}\n\n---\nLatest message from the user:\n` : "";
+  // Chat: digest of the project's other saved conversations (lib/ai/chatStore) — the builder's memory.
+  const memory = chat && typeof body.memory === "string" && body.memory.trim()
+    ? `Earlier conversations in this project (for reference):\n${body.memory.trim().slice(0, 12_000)}\n\n---\n` : "";
+  const transcript = memory + (history.length ? `Conversation so far:\n${history.join("\n\n")}\n\n---\nLatest message from the user:\n` : "");
   if (!prompt) return Response.json({ error: "Empty prompt" }, { status: 400 });
   if (running) return Response.json({ error: "A generator run is already in progress." }, { status: 409 });
 
@@ -126,7 +143,9 @@ export async function POST(request: Request) {
     : `${images.length} reference images are attached, in this order:\n${images.map((_, i) => `- ${imageLabel(i)}`).join("\n")}\n` +
       "They show the same subject from different views (front = what faces north/-Z in the editor; in a front view the subject's right side is on the image's left).";
   // The images are the main spec when given — make the agent study them first and check against them.
-  const imageNote = images.length === 0 ? "" : `\n\n${imageList}\n` + [
+  const imageNote = images.length === 0 ? "" : chat
+    ? `\n\n${imageList}\nUse them as the visual specification for what you build (a mob's model and texture, an item's or block's texture, a GUI …): study them first, then compare your result against them with screenshots and fix clear differences.`
+    : `\n\n${imageList}\n` + [
     "The reference is the main specification — the result must clearly look like it. Before calling any build tool:",
     "1. Study the image(s) and write a short inventory: every distinct part (head, horns, wings, each leg, tail, weapon, armour pieces…),",
     "   its rough size relative to the body (e.g. wings ≈ 1.5× body height), where it attaches, and the main colours with hex values.",

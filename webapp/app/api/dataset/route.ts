@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/server/auth";
  * The logged-in user's 3D models as training data (JSON Lines, one model per line):
  * { kind, name, prompt, provider, stats, geo, animations, settings, texture_png_base64, … }.
  * ?deleted=1 also includes models that were removed from their project.
- * ?type=chats instead returns the Codex Chat turns: { conversation_id, turn, messages, tools, … }.
+ * ?type=chats instead returns the AI Builder turns: { conversation_id, turn, messages, tools, … }.
  */
 export async function GET(request: Request) {
   const user = await requireUser(request);

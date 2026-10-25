@@ -18,6 +18,12 @@ export const PROJECTS_KEY = "mc-ui-builder-projects";
 const OWNER_KEY = "mc-ui-builder:account";
 const RESOURCE_FOLDERS_KEY = "mc-ui-builder:resource-folders";
 const LAST_PROJECT_KEY = "mc-ui-builder-last-project";
+/** Per-user settings mirrored to /api/kv: kv key → localStorage key. */
+const SETTINGS = {
+  "resource-folders": RESOURCE_FOLDERS_KEY,
+  "ai-conversations": "mc-ui-builder:ai-conversations",
+} as const;
+export type CloudSettingKey = keyof typeof SETTINGS;
 
 export type CloudStatus = "off" | "saved" | "saving" | "error";
 
@@ -157,7 +163,7 @@ export function cloudDeleteFile(kind: CloudFileKind, key: string) {
   void track(() => api(fileUrl(kind, key), { method: "DELETE" }));
 }
 
-export function cloudPutSetting(key: "resource-folders", value: unknown) {
+export function cloudPutSetting(key: CloudSettingKey, value: unknown) {
   if (!active) return;
   void track(() => api(`/api/kv?key=${key}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value }) }));
 }
@@ -202,7 +208,7 @@ const localFileDelete = (kind: CloudFileKind, key: string) =>
 
 /** Removes everything the account syncs from this browser (not the extracted vanilla textures). */
 async function clearLocalAccountData() {
-  for (const k of [PROJECTS_KEY, RESOURCE_FOLDERS_KEY, LAST_PROJECT_KEY]) localStorage.removeItem(k);
+  for (const k of [PROJECTS_KEY, LAST_PROJECT_KEY, ...Object.values(SETTINGS)]) localStorage.removeItem(k);
   for (const kind of ["texture", "structure"] as CloudFileKind[]) {
     for (const key of await localFileKeys(kind)) await localFileDelete(kind, key);
   }
@@ -262,12 +268,14 @@ export async function initialSync(userId: number) {
   }
 
   // Settings: the account's copy wins; a local-only one is uploaded.
-  if (manifest.kv.some((k) => k.key === "resource-folders")) {
-    const { value } = (await (await api("/api/kv?key=resource-folders")).json()) as { value: unknown };
-    localStorage.setItem(RESOURCE_FOLDERS_KEY, JSON.stringify(value));
-  } else {
-    const raw = localStorage.getItem(RESOURCE_FOLDERS_KEY);
-    if (raw) await api("/api/kv?key=resource-folders", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: JSON.parse(raw) }) });
+  for (const [key, storageKey] of Object.entries(SETTINGS)) {
+    if (manifest.kv.some((k) => k.key === key)) {
+      const { value } = (await (await api(`/api/kv?key=${key}`)).json()) as { value: unknown };
+      localStorage.setItem(storageKey, JSON.stringify(value));
+    } else {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) await api(`/api/kv?key=${key}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ value: JSON.parse(raw) }) });
+    }
   }
 
   localStorage.setItem(OWNER_KEY, String(userId));

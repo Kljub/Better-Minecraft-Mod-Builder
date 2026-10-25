@@ -98,7 +98,7 @@ const SCHEMA = [
     INDEX (user_id),
     FOREIGN KEY (user_id) REFERENCES mmb_users(id) ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-  // Codex Chat conversations (lib/server/chatDataset.ts): one row per turn with the whole
+  // AI Builder conversations (lib/server/chatDataset.ts): one row per turn with the whole
   // conversation up to and including it, plus the editor tool calls of that turn.
   `CREATE TABLE IF NOT EXISTS mmb_ai_chats (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

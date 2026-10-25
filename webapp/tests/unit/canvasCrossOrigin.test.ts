@@ -8,7 +8,7 @@ import { join } from "path";
  * saving that canvas then fails ("Tainted canvases may not be exported"). So every `new Image()`
  * must set crossOrigin before its src.
  */
-const SKIP = new Set(["components/CodexChatPanel.tsx", "components/EntityModelGeneratorPanel.tsx"]); // data:/blob: only
+const SKIP = new Set(["components/AiBuilderPanel.tsx", "components/EntityModelGeneratorPanel.tsx"]); // data:/blob: only
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {

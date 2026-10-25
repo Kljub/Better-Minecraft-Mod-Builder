@@ -49,8 +49,8 @@ import { setBridgeEnabled, useBridgeEnabled, useMcpBridge } from "@/lib/ai/mcpBr
 import { stopAgentRun, useAgentRun } from "@/lib/ai/modelAgent";
 import { folderOfKey, forgetKey, moveToFolder, renameAssignedKey } from "@/lib/resourceFolders";
 import EntityModelGeneratorPanel from "@/components/EntityModelGeneratorPanel";
-import CodexChatPanel from "@/components/CodexChatPanel";
-import { MessageSquare, Package } from "lucide-react";
+import AiBuilderPanel from "@/components/AiBuilderPanel";
+import { Hammer, Package } from "lucide-react";
 import { runTool, type EditorApi } from "@/lib/ai/editorTools";
 import { BUILTIN_COLLECTIONS } from "@/lib/ai/builtinCollections";
 import type { EntityModel } from "@/lib/model3d/types";
@@ -2591,7 +2591,18 @@ export default function EditorPage() {
   // Entity Model Generator: its agent run starts its own MCP server on a free port — bridge to it
   // for the run, with the same tool executor as the regular bridge.
   const agentRun = useAgentRun();
-  const [chatOpen, setChatOpen] = useState(false);
+  const chatOpen = activeMainView === "aiBuilder";
+  const openBuilder = () => setMainView({ kind: "section", key: "aiBuilder" });
+  // The builder's tools open what they build (the model must be on screen for screenshots), which
+  // leaves the AI Builder tab — say when it's done and offer the way back to the answer.
+  const builderWasRunning = useRef(false);
+  useEffect(() => {
+    const running = agentRun.running && agentRun.mode === "chat";
+    if (builderWasRunning.current && !running && !chatOpen) {
+      toast(agentRun.result?.ok ? "AI Builder is done." : "AI Builder stopped.", { action: { label: "Open", onClick: () => setMainView({ kind: "section", key: "aiBuilder" }) } });
+    }
+    builderWasRunning.current = running;
+  }, [agentRun.running, agentRun.mode, agentRun.result, chatOpen]);
   const chatProvider = useChatProvider();
   const agentBridge = useMcpBridge(
     agentRun.port !== null, agentRun.port ?? 0,
@@ -2706,7 +2717,7 @@ export default function EditorPage() {
               onScreenChange={(patch) => commitScreen({ ...screen, ...patch })}
               onExportProject={handleExportProject}
               onBuildMod={() => setBuildModOpen(true)}
-              onOpenChat={() => setChatOpen((v) => !v)}
+              onOpenChat={openBuilder}
               chatOpen={chatOpen}
               onImportProject={handleImportProjectClick}
               onCopyJava={handleCopyJava}
@@ -2730,8 +2741,8 @@ export default function EditorPage() {
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={redo} disabled={cursor >= history.length - 1}>Redo</Button>
               <div className="flex-1" />
               <Button variant="ghost" size="sm" className={`h-6 gap-1 px-2 text-xs ${chatOpen ? "bg-accent text-primary" : ""}`} aria-pressed={chatOpen}
-                title={`${chatProviderLabel(chatProvider)} — let the AI use the editor's features`} onClick={() => setChatOpen((v) => !v)}>
-                <MessageSquare className="h-3.5 w-3.5" /> {chatProviderLabel(chatProvider)}
+                title={`${chatProviderLabel(chatProvider)} — describe what you want, the AI builds it`} onClick={openBuilder}>
+                <Hammer className="h-3.5 w-3.5" /> {chatProviderLabel(chatProvider)}
               </Button>
               <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleExportProject}>Export Project</Button>
               <Button variant="ghost" size="sm" className="h-6 gap-1 px-2 text-xs" onClick={() => setBuildModOpen(true)} title="Build the whole project into one mod .jar">
@@ -2791,6 +2802,26 @@ export default function EditorPage() {
                 commit({ ...entry, screens: screens.map((s, i) => i === idx ? { ...s, widgets: [widget, ...s.widgets] } : s) });
               }}
               onOpenScreen={(idx) => { setMainView(null); switchScreen(idx); }}
+            />
+          ) : activeMainView === "aiBuilder" ? (
+            <AiBuilderPanel
+              activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
+              projectKey={projectKey}
+              onAssignTexture={(target, key) => {
+                const api = editorApiRef.current();
+                const list = api.builtins[target.collection];
+                if (list) {
+                  const i = list.findIndex((r) => r.id === target.id);
+                  if (i < 0) return false;
+                  api.setBuiltin(target.collection, list.map((r, j) => (j === i ? { ...r, [target.field]: key } : r)), i);
+                  return true;
+                }
+                const elements = api.elements[target.collection];
+                const i = elements ? elements.findIndex((e) => e.id === target.id) : -1;
+                if (!elements || i < 0) return false;
+                api.setElements(target.collection, elements.map((e, j) => (j === i ? { ...e, [target.field]: key } : e)), i);
+                return true;
+              }}
             />
           ) : activeMainView === "modelGenerator" ? (
             <EntityModelGeneratorPanel
@@ -3200,11 +3231,11 @@ export default function EditorPage() {
                 <button
                   type="button"
                   className="flex items-center gap-1.5 rounded-sm px-1 text-foreground hover:bg-accent"
-                  title={agentRun.mode === "chat" ? "Codex Chat is working — click to open it" : "Entity Model Generator is building — click to see its log"}
-                  onClick={() => (agentRun.mode === "chat" ? setChatOpen(true) : setMainView({ kind: "section", key: "modelGenerator" }))}
+                  title={agentRun.mode === "chat" ? "AI Builder is working — click to open it" : "Entity Model Generator is building — click to see its log"}
+                  onClick={() => (agentRun.mode === "chat" ? openBuilder() : setMainView({ kind: "section", key: "modelGenerator" }))}
                 >
                   <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
-                  {agentRun.mode === "chat" ? "Codex Chat" : "Model generator"}{agentBridge.lastTool ? ` · ${agentBridge.lastTool}` : " · starting"}
+                  {agentRun.mode === "chat" ? "AI Builder" : "Model generator"}{agentBridge.lastTool ? ` · ${agentBridge.lastTool}` : " · starting"}
                 </button>
                 <button type="button" className="rounded-sm px-1 hover:bg-destructive hover:text-white" onClick={stopAgentRun}>Stop</button>
               </span>
@@ -3239,28 +3270,6 @@ export default function EditorPage() {
           </div>
         </div>
 
-        {chatOpen && !tryMode && (
-          <CodexChatPanel
-            activeElement={activeDocType === "element" && activeElementDef && activeElement ? { kind: activeElementDef.kind, id: activeElement.id } : null}
-            projectKey={projectKey}
-            onAssignTexture={(target, key) => {
-              const api = editorApiRef.current();
-              const list = api.builtins[target.collection];
-              if (list) {
-                const i = list.findIndex((r) => r.id === target.id);
-                if (i < 0) return false;
-                api.setBuiltin(target.collection, list.map((r, j) => (j === i ? { ...r, [target.field]: key } : r)), i);
-                return true;
-              }
-              const elements = api.elements[target.collection];
-              const i = elements ? elements.findIndex((e) => e.id === target.id) : -1;
-              if (!elements || i < 0) return false;
-              api.setElements(target.collection, elements.map((e, j) => (j === i ? { ...e, [target.field]: key } : e)), i);
-              return true;
-            }}
-            onClose={() => setChatOpen(false)}
-          />
-        )}
 
         <input
           ref={importRef}

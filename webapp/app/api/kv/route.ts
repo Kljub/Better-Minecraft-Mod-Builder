@@ -2,8 +2,8 @@ import type { RowDataPacket } from "mysql2/promise";
 import { db } from "@/lib/server/db";
 import { requireUser } from "@/lib/server/auth";
 
-/** Small per-user settings (e.g. resource folders), ?key= ; GET → { value }, PUT { value }. */
-const KEYS = new Set(["resource-folders"]);
+/** Small per-user settings (resource folders, AI Builder conversations), ?key= ; GET → { value }, PUT { value }. */
+const KEYS = new Set(["resource-folders", "ai-conversations"]);
 
 export async function GET(request: Request) {
   const user = await requireUser(request);

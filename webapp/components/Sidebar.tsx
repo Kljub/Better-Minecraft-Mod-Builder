@@ -2,7 +2,7 @@
 
 import {
   ChevronLeft, LayoutGrid, Monitor, Sword, Box, Shield, Folders, Tags, Sparkles, FlaskConical,
-  Paintbrush, Trophy, Hammer, Users, Package, Mountain, Globe, Settings, Wand2, Bot, Blocks, ShieldPlus, PanelsTopLeft,
+  Paintbrush, Trophy, Hammer, Users, Package, Mountain, Globe, Settings, Wand2, Bot, Blocks, ShieldPlus, PanelsTopLeft, Construction,
   type LucideIcon,
 } from "lucide-react";
 import { ELEMENT_KINDS, getElementKind } from "@/lib/elements/registry";
@@ -16,12 +16,13 @@ export type ActiveDocType =
 /** Workspace sections in rail order (TOOL_SECTIONS are tools, not element lists). */
 export const SECTIONS = [
   "screens", "items", "blocks", "armors", "creativeTabs", "customAttributes", "effects", "potions",
-  "resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator", "achievements", "recipes", "trades", "lootEntries", "biomes", "dimensions",
+  "resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator", "aiBuilder", "achievements", "recipes", "trades", "lootEntries", "biomes", "dimensions",
 ] as const;
 /** Sections that open a tool instead of a category's element browser: the image library
  * (custom textures), the AI item/skin texture generator, the AI block texture generator, the AI
- * armor set generator, the AI screen GUI texture generator and the AI mob builder. */
-export const TOOL_SECTIONS = ["resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator"] as const;
+ * armor set generator, the AI screen GUI texture generator, the AI mob builder and the AI Builder
+ * (Codex / Claude Code builds whatever you describe). */
+export const TOOL_SECTIONS = ["resources", "skinGenerator", "blockGenerator", "armorGenerator", "guiGenerator", "modelGenerator", "aiBuilder"] as const;
 export type ToolSection = (typeof TOOL_SECTIONS)[number];
 export const isToolSection = (key: SectionKey): key is ToolSection => (TOOL_SECTIONS as readonly string[]).includes(key);
 /** Built-in sections, plus one `el:<kind>` section per generic element kind (lib/elements). */
@@ -31,7 +32,7 @@ type BuiltinSection = (typeof SECTIONS)[number];
 /** Icon per workspace section — shared by the icon rail, the category views and the workspace overview. */
 export const SECTION_ICONS: Record<BuiltinSection, LucideIcon> = {
   screens: Monitor, items: Sword, blocks: Box, armors: Shield, creativeTabs: Folders,
-  customAttributes: Tags, effects: Sparkles, potions: FlaskConical, resources: Paintbrush, skinGenerator: Wand2, blockGenerator: Blocks, armorGenerator: ShieldPlus, guiGenerator: PanelsTopLeft, modelGenerator: Bot,
+  customAttributes: Tags, effects: Sparkles, potions: FlaskConical, resources: Paintbrush, skinGenerator: Wand2, blockGenerator: Blocks, armorGenerator: ShieldPlus, guiGenerator: PanelsTopLeft, modelGenerator: Bot, aiBuilder: Construction,
   achievements: Trophy, recipes: Hammer, trades: Users, lootEntries: Package,
   biomes: Mountain, dimensions: Globe,
 };
@@ -39,7 +40,7 @@ export const SECTION_ICONS: Record<BuiltinSection, LucideIcon> = {
 export const SECTION_LABELS: Record<BuiltinSection, string> = {
   screens: "Screens", items: "Items", blocks: "Blocks", armors: "Armor", creativeTabs: "Creative Tabs",
   customAttributes: "Custom Attributes", effects: "Effects", potions: "Potions", resources: "Resources",
-  skinGenerator: "Item Skin Generator", blockGenerator: "Block Generator", armorGenerator: "Armor Generator", guiGenerator: "Screen GUI Generator", modelGenerator: "Entity Model Generator",
+  skinGenerator: "Item Skin Generator", blockGenerator: "Block Generator", armorGenerator: "Armor Generator", guiGenerator: "Screen GUI Generator", modelGenerator: "Entity Model Generator", aiBuilder: "AI Builder",
   achievements: "Achievements", recipes: "Crafting Recipes", trades: "Trading", lootEntries: "Loot Tables",
   biomes: "Biomes", dimensions: "Dimensions",
 };
@@ -85,8 +86,8 @@ export default function AppSidebar({ active, onGoHome, onOpenAll, onOpenSection,
     ].sort((a, b) => a.label.localeCompare(b.label)),
   ];
   return (
-    // Two icons per row to keep the rail short now that it lists every element type.
-    <nav aria-label="Workspace sections" className="grid h-svh w-[84px] shrink-0 grid-cols-2 content-start justify-items-center gap-0.5 overflow-y-auto border-r bg-[var(--rail)] px-1 py-1.5">
+    // Three icons per row to keep the rail short now that it lists every element type.
+    <nav aria-label="Workspace sections" className="grid h-svh w-[124px] shrink-0 grid-cols-3 content-start justify-items-center gap-0.5 overflow-y-auto border-r bg-[var(--rail)] px-1 py-1.5">
       <button
         type="button"
         title="Back to projects"

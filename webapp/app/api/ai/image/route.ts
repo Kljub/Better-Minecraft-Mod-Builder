@@ -2,7 +2,7 @@ import { guardRequest, runCodexImage } from "../cli";
 import { withLinkedAccount } from "../linked";
 
 /**
- * Codex Chat's `generate_image` tool: pictures from codex's built-in image generation (linked
+ * The AI Builder's `generate_image` tool: pictures from codex's built-in image generation (linked
  * Codex accounts from Settings → AI first, else the machine's own ChatGPT login). Returns PNG data
  * URLs; the chat shows them and only adds them to Resources when the user approves.
  * Dev server only, like the rest of the CLI integration.

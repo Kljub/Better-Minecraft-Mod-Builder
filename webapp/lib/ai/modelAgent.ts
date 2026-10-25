@@ -12,7 +12,7 @@ export interface AgentLogLine { kind: "tool" | "text" | "error" | "info"; text: 
 
 export interface AgentRunState {
   running: boolean;
-  /** "model": Entity Model Generator; "chat": Codex Chat in the editor header */
+  /** "model": Entity Model Generator; "chat": the AI Builder tab */
   mode: "model" | "chat";
   /** port of the run's MCP server while it's up — the page bridges to it */
   port: number | null;
@@ -51,6 +51,8 @@ export async function startAgentRun(opts: {
   mode?: "model" | "chat";
   /** chat: earlier turns */
   history?: { role: "user" | "assistant"; text: string }[];
+  /** chat: digest of the project's other saved conversations */
+  memory?: string;
   /** chat: conversation id + project, stored with the turn as training data */
   conversationId?: string;
   projectKey?: string;

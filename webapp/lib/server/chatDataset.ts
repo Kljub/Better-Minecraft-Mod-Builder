@@ -3,7 +3,7 @@ import { join } from "path";
 import { db } from "./db";
 
 /**
- * Training data from Codex Chat: every turn is stored with the whole conversation up to and
+ * Training data from the AI Builder: every turn is stored with the whole conversation up to and
  * including it (OpenAI/Anthropic-style messages) and the editor tool calls that answered it — a
  * ready-made "conversation → actions" example. Logged-in users: mmb_ai_chats (exported by
  * GET /api/dataset?type=chats and `npm run dataset:export -- out.jsonl --chats`). Without accounts

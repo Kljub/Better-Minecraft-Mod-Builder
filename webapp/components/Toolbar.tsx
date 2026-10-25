@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square, MessageSquare, Package } from "lucide-react";
+import { FolderDown, FolderUp, BookOpen, Clipboard, Grid3x3, AlignCenterHorizontal, AlignCenterVertical, Box, Undo2, Redo2, Play, Square, Hammer, Package } from "lucide-react";
 import Link from "next/link";
 import type { ScreenSpec, BindingsSchema } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ interface Props {
   onExportProject: () => void;
   /** opens "Build mod (.jar)" */
   onBuildMod?: () => void;
-  /** opens the Codex Chat / Claude Chat panel (editor header) */
+  /** opens the AI Builder tab */
   onOpenChat?: () => void;
   chatOpen?: boolean;
   onImportProject: () => void;
@@ -174,8 +174,8 @@ export default function Toolbar({
           <FolderUp className="h-4 w-4" />
         </Button>
         {onOpenChat && (
-          <Button variant="ghost" size="sm" className={`h-7 gap-1 px-2 text-xs ${chatOpen ? "bg-accent text-primary" : ""}`} onClick={onOpenChat} title={`${chatProviderLabel(chatProvider)} — let the AI use the editor's features`} aria-pressed={!!chatOpen}>
-            <MessageSquare className="h-4 w-4" /> {chatProviderLabel(chatProvider)}
+          <Button variant="ghost" size="sm" className={`h-7 gap-1 px-2 text-xs ${chatOpen ? "bg-accent text-primary" : ""}`} onClick={onOpenChat} title={`${chatProviderLabel(chatProvider)} — describe what you want, the AI builds it`} aria-pressed={!!chatOpen}>
+            <Hammer className="h-4 w-4" /> {chatProviderLabel(chatProvider)}
           </Button>
         )}
         <Button variant="ghost" size="sm" className="h-7 w-7 px-0" onClick={onExportProject} title="Export project (all screens)">

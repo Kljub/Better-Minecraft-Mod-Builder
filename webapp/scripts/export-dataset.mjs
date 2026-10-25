@@ -7,7 +7,7 @@
  *   npm run dataset:export -- out.jsonl            # live models
  *   npm run dataset:export -- out.jsonl --deleted  # including removed ones
  *   npm run dataset:export -- out.jsonl --ai-only  # only models built from a prompt
- *   npm run dataset:export -- out.jsonl --chats    # Codex Chat turns instead (conversation → tool calls)
+ *   npm run dataset:export -- out.jsonl --chats    # AI Builder turns instead (conversation → tool calls)
  *   npm run dataset:export -- out.jsonl --structures  # companion-mod structures (prompt → build ops → blocks / .nbt)
  */
 import fs from "node:fs";

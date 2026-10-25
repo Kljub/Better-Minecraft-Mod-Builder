@@ -51,7 +51,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
 }) {
   const settings = useAiSettings();
   const agent = useAgentRun();
-  // A Codex Chat run (editor header) isn't this tab's — don't show its log here, just stay disabled.
+  // An AI Builder run isn't this tab's — don't show its log here, just stay disabled.
   const chatBusy = agent.running && agent.mode === "chat";
   const run = agent.mode === "chat" ? { ...agent, running: false, port: null, log: [], result: null } : agent;
   const [prompt, setPrompt] = useState("");
@@ -338,7 +338,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
                   <Square className="h-3.5 w-3.5" /> Stop
                 </Button>
               ) : (
-                <Button size="sm" className="h-8 gap-1.5" disabled={(!prompt.trim() && !hasReference) || meshBusy || chatBusy} title={chatBusy ? "Codex Chat is working — wait until it's done" : undefined} onClick={start}>
+                <Button size="sm" className="h-8 gap-1.5" disabled={(!prompt.trim() && !hasReference) || meshBusy || chatBusy} title={chatBusy ? "AI Builder is working — wait until it's done" : undefined} onClick={start}>
                   <Play className="h-3.5 w-3.5" /> Generate with {provider ? aiClientLabel(provider) : "AI"}
                 </Button>
               )}
@@ -386,7 +386,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
 }
 
 /** Reads an image file as a data URL, scaled down to at most 1024 px (less upload, fewer tokens). */
-async function referenceImage(file: File): Promise<string> {
+export async function referenceImage(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("That's not an image.");
   const url = URL.createObjectURL(file);
   try {
