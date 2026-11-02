@@ -46,6 +46,23 @@ export function Slider({ label, value, onChange, min, max, step }: {
   );
 }
 
+/**
+ * Stable-Diffusion-style batching: `size` images in parallel per run (one GPU pass — faster, more
+ * VRAM), `count` runs one after another. Total = count × size, capped at `maxTotal`.
+ */
+export function BatchFields({ count, size, onCount, onSize, maxSize = 8, maxTotal = 64 }: {
+  count: number; size: number; onCount: (v: number) => void; onSize: (v: number) => void; maxSize?: number; maxTotal?: number;
+}) {
+  const maxCount = Math.max(1, Math.floor(maxTotal / size));
+  return (
+    <div className="flex flex-col gap-2">
+      <Slider label="Batch count (one after another)" value={Math.min(count, maxCount)} onChange={onCount} min={1} max={maxCount} step={1} />
+      <Slider label="Batch size (in parallel)" value={size} onChange={(v) => { onSize(v); if (count * v > maxTotal) onCount(Math.max(1, Math.floor(maxTotal / v))); }} min={1} max={maxSize} step={1} />
+      <span className="-mt-1 text-[10px] text-muted-foreground">= {Math.min(count, maxCount) * size} images · bigger batches are faster but need more GPU memory</span>
+    </div>
+  );
+}
+
 /** Seed as typed text, so "-" (on the way to "-1") is a valid intermediate state; anything that
  * isn't a whole number means -1 = random. */
 export function useSeed() {

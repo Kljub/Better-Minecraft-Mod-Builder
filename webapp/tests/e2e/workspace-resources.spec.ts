@@ -98,3 +98,58 @@ test("Resources: duplicate an image — the copy lands in the same folder", asyn
   await page.getByTestId("workspace-context-menu").getByRole("menuitem", { name: "Duplicate" }).click();
   await expect(page.getByText(/Duplicated as “ruby_copy_3”/)).toBeVisible();
 });
+
+test("Resources: double-clicking an image that isn't 16×16 (WebP too) opens it with its pixels", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, screen());
+  await openEditor(page);
+  await page.getByTitle("Resources", { exact: true }).click();
+  const panel = page.getByTestId("resources-panel");
+  await panel.getByTestId("resources-upload-input").setInputFiles([
+    { name: "gem.webp", mimeType: "image/webp", buffer: fs.readFileSync(path.join(__dirname, "../fixtures/gradient_64.webp")) },
+  ]);
+  await panel.locator('[data-texture-key="custom/gem.webp"]').dblclick();
+  // The hidden layer canvas holds the image (it used to be drawn before the resize, which wiped it).
+  await expect.poll(() => page.evaluate(() => {
+    const layer = [...document.querySelectorAll("canvas")].find((c) => c.style.display === "none")!;
+    const d = layer.getContext("2d")!.getImageData(0, 0, layer.width, layer.height).data;
+    let opaque = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i]) opaque++;
+    return opaque;
+  })).toBe(64 * 64);
+});
+
+test("Resources: downscale selected images to a power of two, as copies or in place", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, screen());
+  await openEditor(page);
+  await page.getByTitle("Resources", { exact: true }).click();
+  const panel = page.getByTestId("resources-panel");
+  const gradient = fs.readFileSync(path.join(__dirname, "../fixtures/gradient_64.webp"));
+  await panel.getByTestId("resources-upload-input").setInputFiles([
+    { name: "a.webp", mimeType: "image/webp", buffer: gradient },
+    { name: "b.webp", mimeType: "image/webp", buffer: gradient },
+  ]);
+  const sizeOf = (key: string) => page.evaluate(async (k) => {
+    const img = [...document.querySelectorAll<HTMLImageElement>(`[data-texture-key="${k}"] img`)][0];
+    await img.decode();
+    return `${img.naturalWidth}x${img.naturalHeight}`;
+  }, key);
+
+  // both uploads are selected after the upload — copies at 16px, originals stay 64px
+  const box = panel.getByTestId("resource-downscale");
+  await box.getByRole("group", { name: "Downscale size" }).getByRole("button", { name: "16", exact: true }).click();
+  await box.getByRole("button", { name: /Downscale 2 images to 16px/ }).click();
+  await expect(panel.locator('[data-texture-key="custom/a_16.png"]')).toBeVisible();
+  await expect(panel.locator('[data-texture-key="custom/b_16.png"]')).toBeVisible();
+  await expect.poll(() => sizeOf("custom/a_16.png")).toBe("16x16");
+  await expect.poll(() => sizeOf("custom/b_16.png")).toBe("16x16");
+  await expect.poll(() => sizeOf("custom/a.webp")).toBe("64x64");
+
+  // in place: same key, new size
+  await panel.locator('[data-texture-key="custom/a.webp"]').click();
+  await box.getByRole("button", { name: "32", exact: true }).click();
+  await box.getByLabel(/Keep original/).uncheck();
+  await box.getByRole("button", { name: /to 32px/ }).click();
+  await expect.poll(() => sizeOf("custom/a.webp")).toBe("32x32");
+});

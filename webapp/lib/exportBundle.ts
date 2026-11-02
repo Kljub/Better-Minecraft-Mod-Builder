@@ -1,8 +1,11 @@
 import JSZip from "jszip";
 import { toBedrockGeo } from "./model3d/codecs";
 import { armorRuntimeModel } from "./model3d/armorModel";
+import { blockModelFile, buildBlockModel, facingBlockstate, partBlockId } from "./model3d/blockModel";
+import type { EntityModel } from "./model3d/types";
 import type { ElementsByKind } from "./elements/types";
 import { DEFAULT_MC_VERSION, type McVersion } from "./mcVersion";
+import { EFFECT_IDS_KEY } from "./elements/types";
 import { writeElementFiles, writeElementArchiveCopies, hasElements, elementTextureKeys, elementBinaryKeys } from "./elements/export";
 import { loadStructureFiles } from "./structureStore";
 import { primeMeshPacks } from "./model3d/meshPackStore";
@@ -101,6 +104,41 @@ export function writeChestBlockFiles(zip: JSZip, prefix: string, modId: string, 
       model: { type: "minecraft:chest", texture: `${modId}:${block.id}` },
     },
   }, null, 2));
+}
+
+/** The entity model a "custom" block draws (BlockSpec.customModel), if it exists. */
+function customBlockModel(block: BlockSpec, elements: ElementsByKind): EntityModel | null {
+  if (block.model !== "custom" || !block.customModel) return null;
+  return (elements.entityModel ?? []).find((e) => e.id === block.customModel) as unknown as EntityModel ?? null;
+}
+
+/**
+ * A block drawn by an entity model (BlockSpec.model "custom"): one model + blockstate per occupied
+ * 16³ cell — the placed block and, for a multiblock, its parts "<id>_p_<x>_<y>_<z>" — all with
+ * the four horizontal facings; the model's texture goes to textures/block/<id>.png. The item shows
+ * the whole model scaled into one block.
+ */
+export function writeCustomBlockFiles(zip: JSZip, prefix: string, modId: string, block: BlockSpec, model: EntityModel, allTextures: Record<string, Blob>) {
+  const built = buildBlockModel(model, !!block.multiblock);
+  const skin = model.texture ? allTextures[`pack:${model.texture}`] : undefined;
+  if (skin) zip.file(`${prefix}assets/${modId}/textures/block/${block.id}.png`, skin);
+  const texture = skin ? `${modId}:block/${block.id}` : "minecraft:block/stone";
+  for (const part of built.parts) {
+    const id = partBlockId(block.id, part.offset);
+    zip.file(`${prefix}assets/${modId}/models/block/${id}.json`, blockModelFile(texture, part.elements));
+    zip.file(`${prefix}assets/${modId}/blockstates/${id}.json`, facingBlockstate(`${modId}:block/${id}`));
+  }
+  if (!block.hasItem) return;
+  zip.file(`${prefix}assets/${modId}/models/item/${block.id}.json`, blockModelFile(texture, built.itemElements, true));
+  zip.file(`${prefix}assets/${modId}/items/${block.id}.json`, itemDefinitionJson(`${modId}:item/${block.id}`));
+}
+
+/** blocks.json entry: a "custom" block gets its parts (offsets + collision boxes) for the runtime. */
+function blockManifestEntry(block: BlockSpec, elements: ElementsByKind): BlockSpec {
+  const model = customBlockModel(block, elements);
+  if (!model) return block.model === "custom" ? { ...block, model: "cube" } : block;
+  const { parts } = buildBlockModel(model, !!block.multiblock);
+  return { ...block, parts: parts.map((p) => ({ offset: p.offset, boxes: p.boxes })) };
 }
 
 function blockItemModelJson(modId: string, block: BlockSpec): string {
@@ -556,6 +594,11 @@ export function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r
       writeChestBlockFiles(zip, prefix, modId, block, allTextures);
       continue;
     }
+    const custom = customBlockModel(block, r.elements);
+    if (custom) {
+      writeCustomBlockFiles(zip, prefix, modId, block, custom, allTextures);
+      continue;
+    }
     zip.file(`${prefix}assets/${modId}/blockstates/${block.id}.json`, blockstateJson(modId, block));
     zip.file(`${prefix}assets/${modId}/models/block/${block.id}.json`, blockModelJson(modId, block));
     if (block.hasItem) {
@@ -579,7 +622,7 @@ export function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r
     zip.file(`${prefix}assets/${modId}/screenspec/creative_tabs.json`, JSON.stringify(tabs, null, 2));
   }
   if (r.items.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/items.json`, JSON.stringify(r.items, null, 2));
-  if (r.blocks.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/blocks.json`, JSON.stringify(r.blocks, null, 2));
+  if (r.blocks.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/blocks.json`, JSON.stringify(r.blocks.map((b) => blockManifestEntry(b, r.elements)), null, 2));
   if (r.customAttributes.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/attributes.json`, JSON.stringify(r.customAttributes, null, 2));
   if (r.effects.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/effects.json`, JSON.stringify(r.effects, null, 2));
   if (r.potions.length > 0) zip.file(`${prefix}assets/${modId}/screenspec/potions.json`, JSON.stringify(r.potions, null, 2));
@@ -669,6 +712,7 @@ export function writeGeneratedFiles(zip: JSZip, prefix: string, modId: string, r
 
   writeElementFiles(zip, prefix, r.elements, {
     modId, mcVersion: r.mcVersion, texture: (k) => allTextures[`pack:${k}`], file: (k) => allTextures[`structure:${k}`],
+    elementIds: { [EFFECT_IDS_KEY]: r.effects.map((e) => `${modId}:${e.id}`) },
   });
 
   return bundled;

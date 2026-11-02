@@ -55,6 +55,8 @@ export default function ScreenGuiGeneratorPanel({ screens, onAddToScreen, onOpen
   const [guidance, setGuidance] = useState(7);
   const [strength, setStrength] = useState(0.85);
   const [pixelate, setPixelate] = useState(true);
+  /** SD 1.5 engine: draw the material with the "pixel ai style" LoRA */
+  const [pixaiStyle, setPixaiStyle] = useState(false);
   const seedState = useSeed();
   const [base, setBase] = useState<{ label: string; url: string } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -100,7 +102,7 @@ export default function ScreenGuiGeneratorPanel({ screens, onAddToScreen, onOpen
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             backend: "local", mode: "gui", prompt, count: n, steps, guidance, strength, seed: seedState.seed,
-            width: w, height: h, pixelate, sketch: baseImg?.dataUrl,
+            width: w, height: h, pixelate, sketch: baseImg?.dataUrl, style: pixaiStyle ? "pixai" : "sd15",
           }),
         });
         const data = (await res.json()) as { images?: { name: string; dataUrl: string }[]; error?: string };
@@ -225,6 +227,10 @@ export default function ScreenGuiGeneratorPanel({ screens, onAddToScreen, onOpen
           <Slider label="Images" value={Math.min(count, maxCount)} onChange={setCount} min={1} max={maxCount} step={1} />
           {engine === "sd15" && (
             <>
+              <label className="flex items-center gap-1.5 text-xs" title="pixel ai style LoRA by busy_men (civitai.com/models/84382) — no commercial use of the images; downloads 144 MB on first use">
+                <input type="checkbox" checked={pixaiStyle} onChange={(e) => setPixaiStyle(e.target.checked)} className="accent-primary" />
+                Pixel AI material (LoRA, no commercial use)
+              </label>
               {mode === "restyle" && <Slider label="Strength (0 = original colours · 1 = new material)" value={strength} onChange={setStrength} min={0} max={1} step={0.05} />}
               <Slider label="Steps" value={steps} onChange={setSteps} min={10} max={50} step={1} />
               <Slider label="Guidance" value={guidance} onChange={setGuidance} min={1} max={15} step={0.5} />

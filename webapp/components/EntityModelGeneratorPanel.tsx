@@ -55,6 +55,9 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
   const chatBusy = agent.running && agent.mode === "chat";
   const run = agent.mode === "chat" ? { ...agent, running: false, port: null, log: [], result: null } : agent;
   const [prompt, setPrompt] = useState("");
+  /** what to build: a mob, or a placeable block (one block = 16×16×16 px; more = multiblock) */
+  const [target, setTarget] = useState<"mob" | "block">("mob");
+  const [blockSize, setBlockSize] = useState<[number, number, number]>([1, 1, 1]);
   const [images, setImages] = useState<RefImage[]>([]);
   const [imageError, setImageError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -161,8 +164,8 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
     ];
     startAgentRun({
       provider, model: settings.clients[provider].model,
-      prompt: prompt.trim() || (reference ? "Build a mob based on the reference model." : `Build a mob based on the reference image${images.length > 1 ? "s" : ""}.`),
-      context: { activeElement, ...(reference ? { referenceModel: reference } : {}) },
+      prompt: prompt.trim() || `Build a ${target === "block" ? "block" : "mob"} based on the reference ${reference ? "model" : `image${images.length > 1 ? "s" : ""}`}.`,
+      context: { activeElement, ...(reference ? { referenceModel: reference } : {}), ...(target === "block" ? { target: { kind: "block", size: blockSize } } : {}) },
       ...(sent.length ? { images: sent } : {}),
     });
   };
@@ -185,6 +188,32 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
           </div>
         ) : (
           <>
+            <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="model-target">
+              <div className="flex gap-0.5 rounded-sm border p-0.5" role="group" aria-label="Build target">
+                {(["mob", "block"] as const).map((t) => (
+                  <button key={t} type="button" disabled={run.running} onClick={() => setTarget(t)}
+                    className={`h-6 rounded-sm px-2 ${target === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+                    {t === "mob" ? "Mob" : "Block"}
+                  </button>
+                ))}
+              </div>
+              {target === "block" && (
+                <>
+                  <span className="text-muted-foreground">Size in blocks</span>
+                  {(["W", "H", "D"] as const).map((label, i) => (
+                    <label key={label} className="flex items-center gap-1">
+                      {label}
+                      <input type="number" min={1} max={64} value={blockSize[i]} aria-label={`Block size ${label}`} disabled={run.running}
+                        onChange={(e) => setBlockSize((s) => s.map((v, j) => (j === i ? Math.max(1, Math.min(64, Math.round(Number(e.target.value)) || 1)) : v)) as [number, number, number])}
+                        className="h-6 w-12 rounded-sm border border-input bg-card px-1" />
+                    </label>
+                  ))}
+                  <span className="text-muted-foreground">
+                    = {blockSize.map((n) => n * 16).join("×")} px{blockSize.some((n) => n > 1) ? " · multiblock" : ""}
+                  </span>
+                </>
+              )}
+            </div>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -194,7 +223,7 @@ export default function EntityModelGeneratorPanel({ activeElement, onOpenModels,
               onDrop={(e) => { const f = [...e.dataTransfer.files].filter((x) => x.type.startsWith("image/")); if (f.length) { e.preventDefault(); takeImages(f); } }}
               disabled={run.running}
               rows={4}
-              placeholder="z.B. Ein Höllenhund mit glühenden Augen und Lava-Rissen, feindlich, 30 Leben…"
+              placeholder={target === "block" ? "z.B. Ein Holzstuhl mit Kissen · ein Laternenpfahl · eine Statue…" : "z.B. Ein Höllenhund mit glühenden Augen und Lava-Rissen, feindlich, 30 Leben…"}
               className="w-full resize-y rounded-sm border border-input bg-card px-2 py-1.5 text-sm outline-none focus:border-primary disabled:opacity-60"
             />
             <div className="flex flex-col gap-1.5 text-xs" data-testid="reference-image">

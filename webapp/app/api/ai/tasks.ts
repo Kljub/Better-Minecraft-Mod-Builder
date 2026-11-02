@@ -7,6 +7,7 @@ import {
   SKIN_DESCRIBE_SCHEMA, SKIN_QUALITY_SCHEMA, sanitizeSkinVisionContext, skinDescribePrompt, skinDescribeSystem, skinQualityPrompt,
   skinQualitySystem, validateSkinDescription, validateSkinQuality,
 } from "@/lib/ai/skinVision";
+import { LAYER_PAINT_SCHEMA, layerPaintPrompt, layerPaintSystem, sanitizeLayerPaintContext, validateLayerPaint } from "@/lib/ai/layerPaint";
 
 /**
  * AI tasks the editor can request. Each turns the user's free-text request plus editor context
@@ -118,6 +119,10 @@ export function buildTask(task: unknown, context: unknown): AiTask | null {
       const c = sanitizeSkinVisionContext(context);
       return { system: skinDescribeSystem(c.target), schema: SKIN_DESCRIBE_SCHEMA, validate: validateSkinDescription };
     }
+    case "layerPaint": {
+      const c = sanitizeLayerPaintContext(context);
+      return { system: layerPaintSystem(c), schema: LAYER_PAINT_SCHEMA, validate: (raw) => validateLayerPaint(raw, c) };
+    }
     case "skinQuality": {
       const c = sanitizeSkinVisionContext(context);
       return { system: skinQualitySystem(c.target), schema: SKIN_QUALITY_SCHEMA, validate: (raw) => validateSkinQuality(raw, c.count ?? 1) };
@@ -133,6 +138,7 @@ export function buildPrompt(task: string, prompt: string, context: unknown): str
   if (task === "rig") return rigPrompt(prompt, sanitizeRigContext(context));
   if (task === "skinDescribe") return skinDescribePrompt(prompt === "-" ? "" : prompt, sanitizeSkinVisionContext(context).target);
   if (task === "skinQuality") return skinQualityPrompt(prompt, sanitizeSkinVisionContext(context));
+  if (task === "layerPaint") return layerPaintPrompt(prompt, sanitizeLayerPaintContext(context));
   const c = (context ?? {}) as Partial<AttributesContext>;
   const about = [
     str(c.name) && `Name: ${str(c.name)}`,

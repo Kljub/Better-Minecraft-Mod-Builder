@@ -18,6 +18,7 @@ import { BUILTIN_COLLECTIONS, builtinCollection, describeCollection, recordId } 
 import { proposeImages, updateImageProposal } from "./imageProposals";
 import { genId } from "@/lib/utils";
 import { fitImage } from "@/lib/imageFit";
+import { buildBlockModel, fitsOneBlock } from "@/lib/model3d/blockModel";
 
 /** What the tools need from the editor page — rebuilt every render, read through a ref. */
 export interface EditorApi {
@@ -200,6 +201,26 @@ export async function runTool(api: () => EditorApi, tool: string, args: Record<s
       api().setBuiltin(def.key, [...cur, record], def.docType ? cur.length : undefined);
       await nextFrame();
       return { ok: true, collection: def.key, id, ...(unknown.length ? { warning: `fields not known for ${def.key}: ${unknown.join(", ")} — kept, check describe_collection` } : {}) };
+    }
+    case "create_block_from_model": {
+      // a block (Blocks collection, model "custom") drawn by an entity model; multiblock when bigger than 16³ px
+      const modelId = String(a.model);
+      const model = getModel(modelId);
+      const def = builtinCollection("blocks");
+      const cur = api().builtins[def.key] ?? [];
+      const id = recordId(a.id ?? modelId, def.idPrefix, cur.map((r) => String(r.id)));
+      const multiblock = !fitsOneBlock(model);
+      const built = buildBlockModel(model, multiblock);
+      const record = {
+        ...def.defaults(id), id, model: "custom", customModel: modelId, multiblock,
+        ...(a.display_name ? { displayName: String(a.display_name) } : {}),
+        ...(a.hardness !== undefined ? { hardness: Number(a.hardness), resistance: Number(a.hardness) * 3 } : {}),
+        ...(a.sound ? { soundType: String(a.sound) } : {}),
+        ...(a.light !== undefined ? { luminance: Math.max(0, Math.min(15, Math.round(Number(a.light)))) } : {}),
+      };
+      api().setBuiltin(def.key, [...cur, record], cur.length);
+      await nextFrame();
+      return { ok: true, id, size_in_blocks: built.size, parts: built.parts.length, ...(built.warnings.length ? { warnings: built.warnings } : {}) };
     }
     case "update_record": {
       const def = builtinCollection(String(a.collection));

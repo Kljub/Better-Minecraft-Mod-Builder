@@ -39,7 +39,7 @@ export const SECTION_ICONS: Record<BuiltinSection, LucideIcon> = {
 
 export const SECTION_LABELS: Record<BuiltinSection, string> = {
   screens: "Screens", items: "Items", blocks: "Blocks", armors: "Armor", creativeTabs: "Creative Tabs",
-  customAttributes: "Custom Attributes", effects: "Effects", potions: "Potions", resources: "Resources",
+  customAttributes: "Attributes", effects: "Effects", potions: "Potions", resources: "Resources",
   skinGenerator: "Item Skin Generator", blockGenerator: "Block Generator", armorGenerator: "Armor Generator", guiGenerator: "Screen GUI Generator", modelGenerator: "Entity Model Generator", aiBuilder: "AI Builder",
   achievements: "Achievements", recipes: "Crafting Recipes", trades: "Trading", lootEntries: "Loot Tables",
   biomes: "Biomes", dimensions: "Dimensions",

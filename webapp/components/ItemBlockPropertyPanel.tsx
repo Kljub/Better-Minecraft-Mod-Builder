@@ -2,6 +2,8 @@
 
 import React, { useState } from "react";
 import { isChestSkinKey } from "@/lib/chestModel";
+import { buildBlockModel, fitsOneBlock } from "@/lib/model3d/blockModel";
+import type { EntityModel } from "@/lib/model3d/types";
 import CreativeTabsField from "@/components/CreativeTabsField";
 import type { ItemSpec, BlockSpec, BlockFaceKey, AttributeModifierSpec, CreativeTabSpec, CustomAttributeSpec } from "@/lib/types";
 import type { PropField } from "@/lib/widgetRegistry";
@@ -38,6 +40,9 @@ interface Props {
   onEditCustomAttribute?: (id: string) => void;
   /** Opens the inline texture editor workspace ("paint a new texture") for this item/block. */
   onOpenTextureEditor: () => void;
+  /** entity models (Models tab) a block can be drawn with (model "custom") */
+  entityModels?: (EntityModel & { id: string })[];
+  onOpenModel?: (id: string) => void;
 }
 
 /**
@@ -45,7 +50,7 @@ interface Props {
  * section here (those are screen-widget concepts) — just ID, texture, and the propSchema-driven
  * field loop, reusing the same generic form primitives as PropertyPanel (see SchemaFields.tsx).
  */
-export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, customAttributes, onOpenTextureEditor, modId, onEditCustomAttribute }: Props) {
+export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, customAttributes, onOpenTextureEditor, modId, onEditCustomAttribute, entityModels = [], onOpenModel }: Props) {
   const { packTextures, uploadCustomTexture } = useTextures();
   const [texPickerOpen, setTexPickerOpen] = useState(false);
   const [stagePickerFor, setStagePickerFor] = useState<number | null>(null);
@@ -121,8 +126,12 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
             >
               <option value="cube">Cube (full block)</option>
               <option value="chest">Chest (texture = 64×64 chest skin)</option>
+              <option value="custom">Custom model (from an entity model)</option>
             </select>
           </Field>
+          {block.model === "custom" && (
+            <CustomModelFields block={block} models={entityModels} set={set} onOpenModel={onOpenModel} />
+          )}
           {block.model === "chest" && (
             <p className="mt-0.5 text-[10px] text-muted-foreground">
               Works like a vanilla chest (27 slots, opening lid). The texture uses the layout of
@@ -132,7 +141,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
         </div>
       )}
 
-      <div className="col-span-2">
+      {block?.model !== "custom" && <div className="col-span-2">
         <Field label={block?.model === "chest" ? "Chest skin" : "Texture"}>
           <div className="flex flex-col gap-1">
             <TextureField
@@ -149,7 +158,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
             </button>
           </div>
         </Field>
-      </div>
+      </div>}
       <TexturePickerModal
         open={texPickerOpen}
         packTextures={packTextures}
@@ -313,7 +322,7 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
         );
       })}
 
-      {block && block.model !== "chest" && (
+      {block && block.model !== "chest" && block.model !== "custom" && (
         <div className="col-span-2">
           <div className="font-semibold text-muted-foreground mt-1">Per-Face Textures</div>
           <p className="text-[10px] text-muted-foreground mb-1">
@@ -440,6 +449,59 @@ export default function ItemBlockPropertyPanel({ doc, onUpdate, creativeTabs, cu
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Block model "custom": which entity model draws it, multiblock on/off, the resulting size. */
+function CustomModelFields({ block, models, set, onOpenModel }: {
+  block: BlockSpec;
+  models: (EntityModel & { id: string })[];
+  set: (patch: Record<string, unknown>) => void;
+  onOpenModel?: (id: string) => void;
+}) {
+  const model = models.find((m) => m.id === block.customModel);
+  const built = model ? buildBlockModel(model, !!block.multiblock) : null;
+  const tooBig = model ? !fitsOneBlock(model) : false;
+  return (
+    <div className="mt-1 flex flex-col gap-1" data-testid="custom-block-model">
+      <Field label="Entity model">
+        <div className="flex gap-1">
+          <select
+            aria-label="Entity model"
+            className="h-6 min-w-0 flex-1 rounded-sm border border-input bg-background px-1 text-xs"
+            value={block.customModel ?? ""}
+            onChange={(e) => set({ customModel: e.target.value || undefined })}
+          >
+            <option value="">— pick a model —</option>
+            {models.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+          </select>
+          {model && onOpenModel && (
+            <button type="button" className="rounded-sm border px-1.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => onOpenModel(model.id)}>
+              Open
+            </button>
+          )}
+        </div>
+      </Field>
+      <label className="flex items-center gap-1.5 text-[11px]">
+        <input type="checkbox" checked={!!block.multiblock} onChange={(e) => set({ multiblock: e.target.checked })} className="accent-primary" />
+        Multiblock (bigger than 16×16×16 px — any size)
+      </label>
+      {!models.length && (
+        <p className="text-[10px] text-muted-foreground">No entity models yet — build one in Models (or with the Entity Model Generator, target “Block”).</p>
+      )}
+      {built && (
+        <p className="text-[10px] text-muted-foreground">
+          {block.multiblock && tooBig
+            ? `${built.size.join(" × ")} blocks · ${built.parts.length} part${built.parts.length === 1 ? "" : "s"} — placed and broken together, turned to face the player.`
+            : "One block (up to 16×16×16 px), turned to face the player."}
+          {" "}Texture: the model&apos;s skin.
+        </p>
+      )}
+      {built && built.parts.length > 64 && (
+        <p className="text-[10px] text-amber-500">{built.parts.length} parts — every part is its own registered block.</p>
+      )}
+      {built?.warnings.map((w) => <p key={w} className="text-[10px] text-amber-500">⚠ {w}</p>)}
     </div>
   );
 }

@@ -10,16 +10,26 @@ import { Field, NumInput } from "@/components/SchemaFields";
 import {
   Eraser, Paintbrush, Trash2, ImageDown, Droplet, ArrowLeft,
   Slash, Square, Circle, PaintBucket, Plus, Eye, EyeOff, ChevronUp, ChevronDown, Undo2, Redo2, Upload,
-  MousePointer2, Check, Wand2,
+  MousePointer2, Check, Wand2, Move, RotateCw, RotateCcw,
   Layers3,
 } from "lucide-react";
+import TextureAiChat from "@/components/TextureAiChat";
+import { layerPaintGrid, rasterizeLayerPaint, type LayerPaintResult } from "@/lib/ai/layerPaint";
 
-const MIN_SIZE = 16;
-const MAX_SIZE = 256;
+const MIN_SIZE = 1;
+// big enough for the generators' output (Pixel AI goes up to 4096) — opening and saving an image
+// used to shrink it to 256 and stretch anything below 16
+const MAX_SIZE = 4096;
 
 function clampSize(n: number): number {
-  if (!Number.isFinite(n)) return MIN_SIZE;
+  if (!Number.isFinite(n)) return 16;
   return Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(n)));
+}
+
+/** An image's size for the canvas: its own, scaled down as a whole (aspect kept) only past MAX_SIZE. */
+function fitImageSize(w: number, h: number): [number, number] {
+  const scale = Math.min(1, MAX_SIZE / Math.max(w, h));
+  return [clampSize(w * scale), clampSize(h * scale)];
 }
 
 function hexToRgba(hex: string): [number, number, number, number] {
@@ -27,7 +37,7 @@ function hexToRgba(hex: string): [number, number, number, number] {
   return [parseInt(clean.slice(0, 2), 16) || 0, parseInt(clean.slice(2, 4), 16) || 0, parseInt(clean.slice(4, 6), 16) || 0, 255];
 }
 
-type Tool = "paint" | "erase" | "line" | "rect" | "ellipse" | "fill" | "bgremove" | "select";
+type Tool = "paint" | "erase" | "line" | "rect" | "ellipse" | "fill" | "bgremove" | "select" | "move";
 type Cell = [number, number];
 interface SelRect { x: number; y: number; w: number; h: number; }
 type SelHandle = "nw" | "ne" | "sw" | "se";
@@ -240,11 +250,17 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
 
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  /** layer whose name is being edited (double-click in the Layers list) */
+  const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
   const paintingRef = useRef(false);
   const shapeStartRef = useRef<Cell | null>(null);
+  /** Move tool: the layers' pixels when the drag started — every drag tick redraws them shifted. */
+  const moveDragRef = useRef<{ start: Cell; base: { idx: number; data: ImageData }[] } | null>(null);
+  const [moveAllLayers, setMoveAllLayers] = useState(false);
   /** Set by loadFromTexture when the source image's size differs from the current canvas — drawn
-   * onto the active layer once the size-change effect below has resized (and cleared) all layers. */
-  const pendingImageRef = useRef<HTMLImageElement | null>(null);
+   * onto the active layer once the size-change effect below has resized (and cleared) all layers —
+   * only at the size it was loaded for, since an unrelated re-render can run that effect first. */
+  const pendingImageRef = useRef<{ img: HTMLImageElement; w: number; h: number } | null>(null);
   /** Set by restoreSnapshot (undo/redo) and by commitWidth/commitHeight (canvas resize, to keep
    * existing pixels instead of wiping them) — per-layer-id pixel data to paint back once the
    * layers array/size change below has (re)created the canvas elements. Same two-step dance as
@@ -560,12 +576,17 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     const prev = previewCanvasRef.current;
     const pctx = prev?.getContext("2d");
     if (prev && pctx) {
-      pctx.imageSmoothingEnabled = false;
+      // fit (aspect kept, centred); pixel-sharp when enlarging, smoothed when shrinking a big texture
+      const scale = Math.min(prev.width / width, prev.height / height);
+      const dw = width * scale, dh = height * scale;
+      const dx = (prev.width - dw) / 2, dy = (prev.height - dh) / 2;
+      pctx.imageSmoothingEnabled = scale < 1;
+      pctx.imageSmoothingQuality = "high";
       pctx.clearRect(0, 0, prev.width, prev.height);
       for (let i = 0; i < layers.length; i++) {
         if (!layers[i].visible) continue;
         const canvas = layerCanvasesRef.current[i];
-        if (canvas) pctx.drawImage(canvas, 0, 0, width, height, 0, 0, prev.width, prev.height);
+        if (canvas) pctx.drawImage(canvas, 0, 0, width, height, dx, dy, dw, dh);
       }
     }
   }
@@ -577,11 +598,12 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
   // stroke happened to call redraw() itself. Also draws a pending template image onto the active
   // layer right after a resize clears it.
   useEffect(() => {
-    if (pendingImageRef.current) {
+    const pending = pendingImageRef.current;
+    if (pending && pending.w === width && pending.h === height) {
       const ctx = getActiveCtx();
       if (ctx) {
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(pendingImageRef.current, 0, 0, width, height);
+        ctx.drawImage(pending.img, 0, 0, width, height);
       }
       pendingImageRef.current = null;
     }
@@ -688,6 +710,15 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
         if (selectionClipboardRef.current) { e.preventDefault(); pasteSelection(); }
         return;
       }
+      if (tool === "move" && !mod && e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        const step = e.shiftKey ? 4 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+        pushUndoSnapshot();
+        shiftLayers(moveBase(), dx, dy);
+        return;
+      }
       if (tool === "select" && !mod && (e.key === "r" || e.key === "R")) {
         if (selection) { e.preventDefault(); rotateSelection90(); }
         return;
@@ -700,6 +731,47 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   });
+
+  /** Move tool: the active layer (or all layers) as they are now, to be shifted from. */
+  function moveBase(): { idx: number; data: ImageData }[] {
+    const idxs = moveAllLayers ? layers.map((_, i) => i) : [activeLayerIdx];
+    return idxs.flatMap((idx) => {
+      const ctx = layerCanvasesRef.current[idx]?.getContext("2d");
+      return ctx ? [{ idx, data: ctx.getImageData(0, 0, width, height) }] : [];
+    });
+  }
+
+  /** Draws `base` shifted by (dx, dy) — whatever leaves the texture is cut off, the gap stays transparent. */
+  function shiftLayers(base: { idx: number; data: ImageData }[], dx: number, dy: number) {
+    for (const { idx, data } of base) {
+      const ctx = layerCanvasesRef.current[idx]?.getContext("2d");
+      if (!ctx) continue;
+      ctx.clearRect(0, 0, width, height);
+      ctx.putImageData(data, dx, dy);
+    }
+    redraw();
+  }
+
+  /** Turns the active layer 90° around the texture's centre — right = clockwise. On a non-square
+   * texture what sticks out past the edge is cut off. One undo step. */
+  function rotateLayer(clockwise: boolean) {
+    if (selection) commitSelection();
+    const ctx = getActiveCtx();
+    if (!ctx) return;
+    pushUndoSnapshot();
+    const w = width, h = height;
+    const src = ctx.getImageData(0, 0, w, h).data;
+    const out = new ImageData(h, w);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      // clockwise: (x, y) → (h-1-y, x); counter-clockwise: (x, y) → (y, w-1-x)
+      const nx = clockwise ? h - 1 - y : y, ny = clockwise ? x : w - 1 - x;
+      const s = (y * w + x) * 4, d = (ny * h + nx) * 4;
+      out.data[d] = src[s]; out.data[d + 1] = src[s + 1]; out.data[d + 2] = src[s + 2]; out.data[d + 3] = src[s + 3];
+    }
+    ctx.clearRect(0, 0, w, h);
+    ctx.putImageData(out, Math.round((w - h) / 2), Math.round((h - w) / 2));
+    redraw();
+  }
 
   function cellFromEvent(e: React.MouseEvent<HTMLCanvasElement>): Cell {
     const x = Math.floor(e.nativeEvent.offsetX / cellSize);
@@ -733,11 +805,80 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     return ellipseCells(start[0], start[1], end[0], end[1], filled);
   }
 
+  /** Cell under the pointer, unclamped — negative or past the edge while dragging outside the canvas. */
+  function cellFromClient(e: MouseEvent): Cell {
+    const rect = displayCanvasRef.current?.getBoundingClientRect();
+    if (!rect) return [0, 0];
+    return [Math.floor((e.clientX - rect.left) / cellSize), Math.floor((e.clientY - rect.top) / cellSize)];
+  }
+
+  // Drags are followed on the window, not the canvas: shapes (and strokes) can be dragged past the
+  // edges — a circle can be centred anywhere and is simply cut off where it leaves the texture.
+  function onDragMove(e: MouseEvent) {
+    const isShapeTool = tool === "line" || tool === "rect" || tool === "ellipse";
+    const [x, y] = cellFromClient(e);
+    if (paintingRef.current && (tool === "paint" || tool === "erase")) { paintAt(x, y); return; }
+    if (tool === "move" && moveDragRef.current) {
+      const { start, base } = moveDragRef.current;
+      shiftLayers(base, x - start[0], y - start[1]);
+      return;
+    }
+    if (isShapeTool && shapeStartRef.current) redraw(cellsFor(tool as "line" | "rect" | "ellipse", shapeStartRef.current, [x, y]));
+    if (tool === "select" && selectionDragRef.current) {
+      const drag = selectionDragRef.current;
+      if (drag.mode === "create") {
+        const x0 = drag.startCell[0], y0 = drag.startCell[1];
+        const minX = Math.max(0, Math.min(x0, x)), maxX = Math.min(width - 1, Math.max(x0, x));
+        const minY = Math.max(0, Math.min(y0, y)), maxY = Math.min(height - 1, Math.max(y0, y));
+        setSelection({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
+      } else if (drag.mode === "move") {
+        const dx = x - drag.startCell[0], dy = y - drag.startCell[1];
+        const nx = Math.max(0, Math.min(width - drag.startSel.w, drag.startSel.x + dx));
+        const ny = Math.max(0, Math.min(height - drag.startSel.h, drag.startSel.y + dy));
+        setSelection({ ...drag.startSel, x: nx, y: ny });
+      } else if (drag.mode === "resize") {
+        const s = drag.startSel;
+        // Raw w/h relative to whichever corner stays fixed (the opposite one from the
+        // dragged handle), then Shift locks that raw w/h back to the original aspect
+        // ratio — driven by whichever axis moved more — before deriving x/y from it, so
+        // the fixed corner really does stay put regardless of the lock.
+        let rawW = s.w, rawH = s.h;
+        if (drag.handle === "se") { rawW = x - s.x + 1; rawH = y - s.y + 1; }
+        else if (drag.handle === "sw") { rawW = (s.x + s.w) - x; rawH = y - s.y + 1; }
+        else if (drag.handle === "ne") { rawW = x - s.x + 1; rawH = (s.y + s.h) - y; }
+        else if (drag.handle === "nw") { rawW = (s.x + s.w) - x; rawH = (s.y + s.h) - y; }
+        rawW = Math.max(1, rawW); rawH = Math.max(1, rawH);
+        const [nw0, nh0] = e.shiftKey ? lockAspect(rawW, rawH, s.w, s.h) : [rawW, rawH];
+        let nx = s.x, ny = s.y, nw = nw0, nh = nh0;
+        if (drag.handle === "sw" || drag.handle === "nw") nx = (s.x + s.w) - nw;
+        if (drag.handle === "ne" || drag.handle === "nw") ny = (s.y + s.h) - nh;
+        nx = Math.max(0, nx); ny = Math.max(0, ny);
+        nw = Math.min(nw, width - nx); nh = Math.min(nh, height - ny);
+        setSelection({ x: nx, y: ny, w: nw, h: nh });
+      }
+    }
+  }
+
+  function onDragUp(e: MouseEvent) {
+    const isShapeTool = tool === "line" || tool === "rect" || tool === "ellipse";
+    if (isShapeTool && shapeStartRef.current) {
+      const [x, y] = cellFromClient(e);
+      commitShapeCells(cellsFor(tool as "line" | "rect" | "ellipse", shapeStartRef.current, [x, y]));
+      shapeStartRef.current = null;
+    }
+    if (tool === "select") selectionDragRef.current = null;
+    moveDragRef.current = null;
+    paintingRef.current = false;
+  }
+
   useEffect(() => {
-    const onUp = () => { paintingRef.current = false; };
-    window.addEventListener("mouseup", onUp);
-    return () => window.removeEventListener("mouseup", onUp);
-  }, []);
+    window.addEventListener("mousemove", onDragMove);
+    window.addEventListener("mouseup", onDragUp);
+    return () => {
+      window.removeEventListener("mousemove", onDragMove);
+      window.removeEventListener("mouseup", onDragUp);
+    };
+  });
 
   function loadFromTexture(key: string) {
     const url = packTextures[key];
@@ -747,8 +888,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     const img = new Image();
     img.crossOrigin = "anonymous"; // pack textures can be GitHub URLs — keeps the canvas exportable
     img.onload = () => {
-      const w = clampSize(img.naturalWidth || width);
-      const h = clampSize(img.naturalHeight || height);
+      const [w, h] = fitImageSize(img.naturalWidth || width, img.naturalHeight || height);
       if (w === width && h === height) {
         const ctx = getActiveCtx();
         if (ctx) {
@@ -758,7 +898,7 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
         }
         redraw();
       } else {
-        pendingImageRef.current = img;
+        pendingImageRef.current = { img, w, h };
         applySize(w, h);
       }
     };
@@ -840,6 +980,61 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     schedulePendingRestore({ ...(blank ? {} : snap.images), ...Object.fromEntries(metas.map((m, i) => [m.id, created[i].image])) });
     setLayers([...kept, ...metas]);
     setActiveLayerIdx(kept.length + metas.length - 1);
+  };
+
+  /** The texture for the AI side chat: all visible layers and the active layer, enlarged pixel-exact
+   * over a checkerboard (so transparency is visible), plus the layer list. */
+  const aiSnapshot = () => {
+    const scale = Math.max(1, Math.floor(512 / Math.max(width, height)));
+    const render = (layerIdxs: number[]) => {
+      const c = document.createElement("canvas");
+      c.width = width * scale;
+      c.height = height * scale;
+      const ctx = c.getContext("2d")!;
+      const cb = Math.max(4, scale / 2);
+      for (let y = 0; y < c.height; y += cb) for (let x = 0; x < c.width; x += cb) {
+        ctx.fillStyle = ((x / cb + y / cb) % 2 === 0) ? "#c8c8c8" : "#9a9a9a";
+        ctx.fillRect(x, y, cb, cb);
+      }
+      ctx.imageSmoothingEnabled = false;
+      for (const i of layerIdxs) {
+        const canvas = layerCanvasesRef.current[i];
+        if (canvas) ctx.drawImage(canvas, 0, 0, width, height, 0, 0, c.width, c.height);
+      }
+      return c.toDataURL("image/png");
+    };
+    return {
+      composite: render(layers.flatMap((l, i) => (l.visible ? [i] : []))),
+      active: render([activeLayerIdx]),
+      context: { width, height, layerNames: layers.map((l) => l.name), activeLayer: layers[activeLayerIdx]?.name ?? "" },
+    };
+  };
+
+  /** Puts an AI side-chat answer on the texture (one undo step): a new layer right above the active
+   * one, or — when asked for — onto the active layer itself. Returns the layer's name. */
+  const applyAiPaint = (res: LayerPaintResult): string => {
+    const image = rasterizeLayerPaint(res, width, height, layerPaintGrid(width, height).factor);
+    if (res.target === "active_layer" && layers[activeLayerIdx]) {
+      const ctx = getActiveCtx();
+      if (ctx) {
+        pushUndoSnapshot();
+        const tmp = document.createElement("canvas");
+        tmp.width = width;
+        tmp.height = height;
+        tmp.getContext("2d")!.putImageData(image, 0, 0);
+        ctx.drawImage(tmp, 0, 0);
+        redraw();
+        return layers[activeLayerIdx].name;
+      }
+    }
+    const snap = captureSnapshot();
+    pushUndoSnapshot();
+    const meta = newLayerMeta(res.layerName);
+    const at = Math.min(layers.length, activeLayerIdx + 1);
+    schedulePendingRestore({ ...snap.images, [meta.id]: image });
+    setLayers([...layers.slice(0, at), meta, ...layers.slice(at)]);
+    setActiveLayerIdx(at);
+    return meta.name;
   };
 
   /** Why a stroke at (x, y) wouldn't show: the active layer is hidden, or a visible layer above is opaque there. */
@@ -931,8 +1126,6 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
     }
   };
 
-  const isShapeTool = tool === "line" || tool === "rect" || tool === "ellipse";
-
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
       <div className="flex flex-wrap items-end gap-3 text-xs shrink-0">
@@ -1015,6 +1208,20 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
         <Button type="button" variant={tool === "select" ? "default" : "outline"} size="sm" className="h-7 px-2" onClick={() => setTool("select")} title="Select a region to move or resize it. Shift+resize keeps it proportional. Ctrl+C/Ctrl+V copy/paste, R rotates 90°, Delete clears.">
           <MousePointer2 className="h-3.5 w-3.5" />
         </Button>
+        <Button type="button" variant={tool === "move" ? "default" : "outline"} size="sm" className="h-7 px-2" onClick={() => setTool("move")} title="Move the image: drag (or arrow keys, Shift = 4 px) to shift the active layer. What leaves the edge is cut off.">
+          <Move className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2" onClick={() => rotateLayer(false)} title="Rotate the active layer 90° left">
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 px-2" onClick={() => rotateLayer(true)} title="Rotate the active layer 90° right">
+          <RotateCw className="h-3.5 w-3.5" />
+        </Button>
+        {tool === "move" && (
+          <label className="flex items-center gap-1 text-muted-foreground" title="Shift every layer together instead of only the active one">
+            <input type="checkbox" checked={moveAllLayers} onChange={(e) => setMoveAllLayers(e.target.checked)} /> All layers
+          </label>
+        )}
         {(tool === "rect" || tool === "ellipse") && (
           <label className="flex items-center gap-1 text-muted-foreground">
             <input type="checkbox" checked={filled} onChange={(e) => setFilled(e.target.checked)} /> Filled
@@ -1121,10 +1328,10 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
             ref={displayCanvasRef}
             width={displayW}
             height={displayH}
-            style={{ width: displayW, height: displayH, imageRendering: "pixelated", cursor: "crosshair" }}
+            style={{ width: displayW, height: displayH, imageRendering: "pixelated", cursor: tool === "move" ? "move" : "crosshair" }}
             onMouseDown={(e) => {
               const [x, y] = cellFromEvent(e);
-              if (tool !== "select" && tool !== "bgremove") checkPaintVisible(x, y);
+              if (tool !== "select" && tool !== "bgremove" && tool !== "move") checkPaintVisible(x, y);
               if (tool === "paint" || tool === "erase") {
                 pushUndoSnapshot();
                 paintingRef.current = true;
@@ -1139,6 +1346,9 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
                 const canvas = layerCanvasesRef.current[activeLayerIdx];
                 if (canvas) removeBackgroundColor(canvas, x, y, bgTolerance);
                 redraw();
+              } else if (tool === "move") {
+                pushUndoSnapshot();
+                moveDragRef.current = { start: [x, y], base: moveBase() };
               } else if (tool === "select") {
                 if (selection) {
                   const handle = selectionHandleAt(e, selection);
@@ -1163,57 +1373,11 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
                 redraw([[x, y]]);
               }
             }}
-            onMouseMove={(e) => {
-              const [x, y] = cellFromEvent(e);
-              if (paintingRef.current && (tool === "paint" || tool === "erase")) { paintAt(x, y); return; }
-              if (isShapeTool && shapeStartRef.current) redraw(cellsFor(tool as "line" | "rect" | "ellipse", shapeStartRef.current, [x, y]));
-              if (tool === "select" && selectionDragRef.current) {
-                const drag = selectionDragRef.current;
-                if (drag.mode === "create") {
-                  const x0 = drag.startCell[0], y0 = drag.startCell[1];
-                  const minX = Math.max(0, Math.min(x0, x)), maxX = Math.min(width - 1, Math.max(x0, x));
-                  const minY = Math.max(0, Math.min(y0, y)), maxY = Math.min(height - 1, Math.max(y0, y));
-                  setSelection({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 });
-                } else if (drag.mode === "move") {
-                  const dx = x - drag.startCell[0], dy = y - drag.startCell[1];
-                  const nx = Math.max(0, Math.min(width - drag.startSel.w, drag.startSel.x + dx));
-                  const ny = Math.max(0, Math.min(height - drag.startSel.h, drag.startSel.y + dy));
-                  setSelection({ ...drag.startSel, x: nx, y: ny });
-                } else if (drag.mode === "resize") {
-                  const s = drag.startSel;
-                  // Raw w/h relative to whichever corner stays fixed (the opposite one from the
-                  // dragged handle), then Shift locks that raw w/h back to the original aspect
-                  // ratio — driven by whichever axis moved more — before deriving x/y from it, so
-                  // the fixed corner really does stay put regardless of the lock.
-                  let rawW = s.w, rawH = s.h;
-                  if (drag.handle === "se") { rawW = x - s.x + 1; rawH = y - s.y + 1; }
-                  else if (drag.handle === "sw") { rawW = (s.x + s.w) - x; rawH = y - s.y + 1; }
-                  else if (drag.handle === "ne") { rawW = x - s.x + 1; rawH = (s.y + s.h) - y; }
-                  else if (drag.handle === "nw") { rawW = (s.x + s.w) - x; rawH = (s.y + s.h) - y; }
-                  rawW = Math.max(1, rawW); rawH = Math.max(1, rawH);
-                  const [nw0, nh0] = e.shiftKey ? lockAspect(rawW, rawH, s.w, s.h) : [rawW, rawH];
-                  let nx = s.x, ny = s.y, nw = nw0, nh = nh0;
-                  if (drag.handle === "sw" || drag.handle === "nw") nx = (s.x + s.w) - nw;
-                  if (drag.handle === "ne" || drag.handle === "nw") ny = (s.y + s.h) - nh;
-                  nx = Math.max(0, nx); ny = Math.max(0, ny);
-                  nw = Math.min(nw, width - nx); nh = Math.min(nh, height - ny);
-                  setSelection({ x: nx, y: ny, w: nw, h: nh });
-                }
-              }
-            }}
-            onMouseUp={(e) => {
-              if (isShapeTool && shapeStartRef.current) {
-                const [x, y] = cellFromEvent(e);
-                commitShapeCells(cellsFor(tool as "line" | "rect" | "ellipse", shapeStartRef.current, [x, y]));
-                shapeStartRef.current = null;
-              }
-              if (tool === "select") selectionDragRef.current = null;
-              paintingRef.current = false;
-            }}
           />
         </div>
 
         <div className="flex w-56 shrink-0 flex-col gap-3 overflow-y-auto">
+          <TextureAiChat snapshot={aiSnapshot} onPaint={applyAiPaint} />
           {tool === "select" && selection && (
             <div className="flex flex-col gap-1 rounded border border-input p-2 text-xs">
               <span className="font-semibold text-muted-foreground">Selection</span>
@@ -1250,12 +1414,29 @@ export default function TextureEditorPanel({ suggestedName, onUpload, onSave, on
                     >
                       {layer.visible ? <Eye /> : <EyeOff />}
                     </button>
-                    <input
-                      className="min-w-0 flex-1 truncate bg-transparent text-xs outline-none"
-                      value={layer.name}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => renameLayer(idx, e.target.value)}
-                    />
+                    {/* click selects (the row's onClick), double-click renames */}
+                    {editingLayerId === layer.id ? (
+                      <input
+                        autoFocus
+                        className="min-w-0 flex-1 truncate rounded-sm border border-input bg-transparent px-0.5 text-xs outline-none"
+                        value={layer.name}
+                        aria-label="Layer name"
+                        onFocus={(e) => e.target.select()}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => renameLayer(idx, e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur(); }}
+                        onBlur={() => setEditingLayerId(null)}
+                      />
+                    ) : (
+                      <span
+                        data-layer-name
+                        className="min-w-0 flex-1 cursor-default select-none truncate text-xs"
+                        title="Click to select · double-click to rename"
+                        onDoubleClick={(e) => { e.stopPropagation(); setActiveLayerIdx(idx); setEditingLayerId(layer.id); }}
+                      >
+                        {layer.name}
+                      </span>
+                    )}
                     <button
                       title="Bring forward"
                       disabled={idx === layers.length - 1}

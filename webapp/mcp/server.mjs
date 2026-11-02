@@ -260,6 +260,13 @@ forward("list_records", "All records of a built-in collection (full data).", { c
 forward("create_record", "Create an item, block, recipe, … in a built-in collection. `record` is merged onto the defaults (see describe_collection); it opens in the editor.", {
   collection: z.enum(COLLECTIONS), record: z.record(z.string(), z.unknown()).describe("fields incl. id (lowercase registry path)"),
 });
+forward("create_block_from_model", "Make a placeable block (Blocks collection) drawn by an entity model: up to 16×16×16 px it is one block, a bigger model becomes a multiblock (one part per 16³ cell, placed/broken together, facing the player). Block space: x/z -8..8 and y 0..16 is the placed block, the front faces north (-Z). Returns size_in_blocks, parts and warnings (rotations that block models can't do).", {
+  model: z.string().describe("entity model id"),
+  id: z.string().regex(/^[a-z0-9_]+$/).optional().describe("block id, default = model id"),
+  display_name: z.string().optional(), hardness: z.number().min(0).optional(),
+  sound: z.enum(["stone", "wood", "metal", "gravel", "grass", "glass", "wool", "sand"]).optional(),
+  light: z.number().int().min(0).max(15).optional(),
+});
 forward("update_record", "Change fields of a built-in record (shallow merge).", {
   collection: z.enum(COLLECTIONS), id: z.string(), changes: z.record(z.string(), z.unknown()),
 });

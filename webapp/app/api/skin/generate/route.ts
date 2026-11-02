@@ -16,11 +16,13 @@ const LOCAL_ONLY_TIMEOUT_MS = 600_000;
 /** a 256×256 RGBA PNG is well below this; the sketch is meant to be a small texture */
 const MAX_SKETCH_BYTES = 2 * 1024 * 1024;
 
-type Mode = "text" | "sketch" | "set" | "block" | "player" | "armor" | "gui";
-const LOCAL_ONLY: Mode[] = ["block", "player", "armor", "gui"];
+type Mode = "text" | "sketch" | "set" | "block" | "player" | "armor" | "gui" | "pixai";
+const LOCAL_ONLY: Mode[] = ["block", "player", "armor", "gui", "pixai"];
 /** modes that run the SDXL skin model: fewer images, more steps */
 const SDXL: Mode[] = ["player", "armor"];
 const BLOCK_SIZES = [16, 32, 64, 128, 256];
+/** the Pixel AI LoRA (tools/skin-generator/pixai.py): drawn at 512, scaled down or nearest-upscaled */
+const PIXAI_SIZES = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 
 /** Only the app's own pages may call this — a random website open in the same browser must not
  * be able to burn the user's GPU / HF quota through it. */
@@ -66,18 +68,22 @@ export async function POST(request: Request) {
 
   const backend: SkinBackend = body.backend === "space" ? "space" : "local";
   const mode = body.mode as Mode;
-  if (!["text", "sketch", "set", "block", "player", "armor", "gui"].includes(mode)) return Response.json({ error: "Unknown mode" }, { status: 400 });
+  if (!["text", "sketch", "set", "block", "player", "armor", "gui", "pixai"].includes(mode)) return Response.json({ error: "Unknown mode" }, { status: 400 });
   if (LOCAL_ONLY.includes(mode) && backend !== "local") return Response.json({ error: "This mode only runs on the local backend" }, { status: 400 });
   const prompt = typeof body.prompt === "string" ? body.prompt.trim().slice(0, 300) : "";
   const sdxl = SDXL.includes(mode);
-  const count = Math.round(clamp(body.count, 1, sdxl ? 4 : 8, sdxl ? 2 : 4));
+  // total images; the local server makes them `batchSize` at a time in parallel, the batches one
+  // after another (A1111's batch size x batch count)
+  const count = Math.round(clamp(body.count, 1, sdxl ? 4 : 64, sdxl ? 2 : 4));
+  const batchSize = Math.round(clamp(body.batchSize, 1, 8, Math.min(count, 8)));
   const steps = Math.round(clamp(body.steps, 10, sdxl ? 60 : 50, sdxl ? 40 : 30));
   const guidance = clamp(body.guidance, 1, 15, 9);
   const strength = clamp(body.strength, 0.3, 0.95, 0.6);
   // -1 (also the fallback for a missing/invalid seed) = a new random seed per run
   const seed = Math.round(clamp(body.seed, -1, 2 ** 31 - 1, -1));
 
-  const timeoutMs = LOCAL_ONLY.includes(mode) ? LOCAL_ONLY_TIMEOUT_MS : TIMEOUT_MS;
+  // a long sequential run (64 images) can outlast the normal timeouts
+  const timeoutMs = Math.max(LOCAL_ONLY.includes(mode) ? LOCAL_ONLY_TIMEOUT_MS : TIMEOUT_MS, count * 15_000);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -86,7 +92,8 @@ export async function POST(request: Request) {
     if (mode === "text" || mode === "player" || mode === "armor") {
       if (!prompt) return Response.json({ error: "Enter a prompt" }, { status: 400 });
       endpoint = { text: "generate", player: "generate_player_skin", armor: "generate_armor" }[mode];
-      data = [prompt, count, steps, guidance, seed];
+      // batch size only exists on the local server, not on the public Space
+      data = mode === "text" && backend === "local" ? [prompt, count, steps, guidance, seed, batchSize] : [prompt, count, steps, guidance, seed];
     } else if (mode === "gui") {
       if (!prompt) return Response.json({ error: "Describe the style, e.g. \"dark oak wood with iron rivets\"" }, { status: 400 });
       // optional: an existing GUI texture to restyle (kept at its own size)
@@ -95,13 +102,19 @@ export async function POST(request: Request) {
       const height = Math.round(clamp(body.height, 16, 512, 166));
       const strength = clamp(body.strength, 0, 1, 0.85);
       endpoint = "generate_gui";
-      data = [sketch, prompt, Math.min(count, 4), strength, steps, guidance, seed, width, height, body.pixelate !== false];
+      data = [sketch, prompt, Math.min(count, 4), strength, steps, guidance, seed, width, height, body.pixelate !== false,
+        body.style === "pixai" ? "pixai" : "sd15"];
+    } else if (mode === "pixai") {
+      if (!prompt) return Response.json({ error: "Enter a prompt, e.g. \"copper sword\"" }, { status: 400 });
+      endpoint = "generate_pixai_item";
+      const size = PIXAI_SIZES.includes(body.size as number) ? (body.size as number) : 32;
+      data = [prompt, count, steps, guidance, seed, size, batchSize];
     } else if (mode === "block") {
       if (!prompt) return Response.json({ error: "Enter a prompt, e.g. \"mossy stone bricks\"" }, { status: 400 });
       endpoint = "generate_block";
-      const engine = body.engine === "lora" || body.engine === "lora119" || body.engine === "sd15" ? body.engine : "item";
-      const size = BLOCK_SIZES.includes(body.size as number) ? (body.size as number) : 16;
-      data = [prompt, count, steps, guidance, seed, engine, body.tileable !== false, size];
+      const engine = body.engine === "lora" || body.engine === "lora119" || body.engine === "sd15" || body.engine === "pixai" ? body.engine : "item";
+      const size = (engine === "pixai" ? PIXAI_SIZES : BLOCK_SIZES).includes(body.size as number) ? (body.size as number) : 16;
+      data = [prompt, count, steps, guidance, seed, engine, body.tileable !== false, size, batchSize];
     } else {
       if (typeof body.sketch !== "string") return Response.json({ error: "Pick or draw a base image first" }, { status: 400 });
       if (mode === "sketch" && !prompt) return Response.json({ error: "Enter a prompt, e.g. \"steel wrench\"" }, { status: 400 });
@@ -110,7 +123,7 @@ export async function POST(request: Request) {
       const sketch = editorValue(await uploadSketch(backend, body.sketch, ctrl.signal));
       endpoint = mode === "sketch" ? "generate_from_sketch" : "generate_tier_set";
       data = mode === "sketch"
-        ? [sketch, prompt, count, strength, steps, guidance, seed]
+        ? (backend === "local" ? [sketch, prompt, count, strength, steps, guidance, seed, batchSize] : [sketch, prompt, count, strength, steps, guidance, seed])
         : [sketch, materials, prompt, strength, steps, guidance, seed];
     }
 

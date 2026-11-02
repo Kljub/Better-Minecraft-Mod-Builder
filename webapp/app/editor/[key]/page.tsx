@@ -55,6 +55,7 @@ import { runTool, type EditorApi } from "@/lib/ai/editorTools";
 import { BUILTIN_COLLECTIONS } from "@/lib/ai/builtinCollections";
 import type { EntityModel } from "@/lib/model3d/types";
 import { ELEMENT_KINDS, getElementKind, normalizeElements, normalizeElement, elementLabel } from "@/lib/elements/registry";
+import { EFFECT_IDS_KEY } from "@/lib/elements/types";
 import type { ElementsByKind, ElementSpec } from "@/lib/elements/types";
 import { MC_VERSIONS, MC_VERSION_LABELS, normalizeMcVersion, type McVersion } from "@/lib/mcVersion";
 import Toolbar from "@/components/Toolbar";
@@ -2944,7 +2945,7 @@ export default function EditorPage() {
                   projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
                   projectScreens: screens.map((s) => s.id),
                   packTextureKeys: vanillaTextureKeys,
-                  elementIds: Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])),
+                  elementIds: { ...Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])), [EFFECT_IDS_KEY]: effects.map((ef) => `${friendlyModId()}:${ef.id}`) },
                 }}
               />
             ) : activeDocType === "element" ? (
@@ -2962,7 +2963,7 @@ export default function EditorPage() {
                         projectBlocks: blocks.map((b) => `${friendlyModId()}:${b.id}`),
                         projectScreens: screens.map((s) => s.id),
                         packTextureKeys: vanillaTextureKeys,
-                        elementIds: Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])),
+                        elementIds: { ...Object.fromEntries(ELEMENT_KINDS.map((k) => [k.kind, (elements[k.kind] ?? []).map((el) => `${friendlyModId()}:${el.id}`)])), [EFFECT_IDS_KEY]: effects.map((ef) => `${friendlyModId()}:${ef.id}`) },
                       }}
                       onChange={(patch) => updateElement(activeElementDef.kind, activeElementRef!.idx,
                         withLabelId(activeElementDef, activeElement, patch, elements[activeElementDef.kind] ?? [],
@@ -2992,6 +2993,7 @@ export default function EditorPage() {
                 <div className="mx-auto max-w-3xl">
                   <EffectPropertyPanel
                     effect={activeEffect}
+                    effects={effects}
                     customAttributes={customAttributes}
                     modId={friendlyModId()}
                     onEditCustomAttribute={(id) => { const i = customAttributes.findIndex((a) => a.id === id); if (i >= 0) switchCustomAttribute(i); }}
@@ -3115,6 +3117,8 @@ export default function EditorPage() {
                     modId={friendlyModId()}
                     onEditCustomAttribute={(id) => { const i = customAttributes.findIndex((a) => a.id === id); if (i >= 0) switchCustomAttribute(i); }}
                     onOpenTextureEditor={() => openTextureEditor({ docType: activeDocType as "item" | "block", index: activeDocType === "item" ? activeItemIdx : activeBlockIdx })}
+                    entityModels={(elements.entityModel ?? []) as unknown as (EntityModel & { id: string })[]}
+                    onOpenModel={(id) => { const i = (elements.entityModel ?? []).findIndex((m) => m.id === id); if (i >= 0) switchElement("entityModel", i); }}
                   />
                 </div>
               </div>

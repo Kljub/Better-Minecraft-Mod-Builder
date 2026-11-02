@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Eraser, PaintBucket, Pipette, Undo2, Redo2, Wand2, Upload, FilePlus2, Grid3x3, Move } from "lucide-react";
+import { Pencil, Eraser, PaintBucket, Pipette, Undo2, Redo2, Wand2, Upload, FilePlus2, Grid3x3, Move, ZoomIn, ZoomOut } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import ModelViewport, { type ModelViewportHandle, type ViewPreset } from "./ModelViewport";
@@ -14,6 +14,9 @@ import { paintCubes, paintFace } from "@/lib/ai/texturePaint";
 import { findCube } from "@/lib/model3d/aiOps";
 import { clipOps, type AiSkin } from "@/lib/model3d/aiSkin";
 import SkinAiBar from "./SkinAiBar";
+
+/** flat texture zoom limit — 64× makes a 16 px texture ~1000 px wide */
+const MAX_ZOOM = 64;
 
 type Tool = "pencil" | "eraser" | "fill" | "picker" | "uv";
 
@@ -51,6 +54,40 @@ export default function SkinPainter({ modelId, model, onChange }: {
   const [recent, setRecent] = useState<string[]>([]);
   const [size, setSize] = useState(1);
   const [zoom, setZoom] = useState(() => Math.max(2, Math.min(12, Math.floor(512 / Math.max(W, H)))));
+  const zoomRef = useRef(zoom);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const textureScrollRef = useRef<HTMLDivElement>(null);
+  /** Zooms the flat texture, keeping the texel under (clientX, clientY) — or the view's centre — in place. */
+  const zoomTo = useCallback((next: number, clientX?: number, clientY?: number) => {
+    const el = textureScrollRef.current;
+    const from = zoomRef.current;
+    const to = Math.max(1, Math.min(MAX_ZOOM, Math.round(next)));
+    if (to === from) return;
+    zoomRef.current = to;
+    setZoom(to);
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const ox = (clientX ?? rect.left + rect.width / 2) - rect.left;
+    const oy = (clientY ?? rect.top + rect.height / 2) - rect.top;
+    const k = to / from;
+    // after React has resized the texture
+    requestAnimationFrame(() => {
+      el.scrollLeft = (el.scrollLeft + ox) * k - ox;
+      el.scrollTop = (el.scrollTop + oy) * k - oy;
+    });
+  }, []);
+  // mouse wheel over the flat texture zooms (non-passive, so the page doesn't scroll instead)
+  useEffect(() => {
+    const el = textureScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const z = zoomRef.current;
+      zoomTo(e.deltaY < 0 ? Math.max(z + 1, z * 1.25) : Math.min(z - 1, z / 1.25), e.clientX, e.clientY);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomTo]);
   const [showUv, setShowUv] = useState(true);
   const [hoverCube, setHoverCube] = useState<string | null>(null);
   /** UV tool: selected island/face, the drag in progress, and whether painted pixels move along */
@@ -394,14 +431,21 @@ export default function SkinPainter({ modelId, model, onChange }: {
       <div className="flex w-[40%] min-w-64 max-w-[640px] shrink-0 flex-col border-l bg-sidebar">
         <div className="flex h-9 shrink-0 items-center gap-2 border-b px-2 text-xs">
           <span className="font-semibold uppercase tracking-wide text-muted-foreground">Texture</span>
-          <label className="flex items-center gap-1 text-muted-foreground">Zoom
-            <input type="range" min={1} max={24} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} className="w-24 accent-[var(--primary)]" />
-          </label>
+          <div className="flex items-center gap-1 text-muted-foreground" title="Zoom — or the mouse wheel over the texture">
+            <Button variant="ghost" size="sm" className="h-6 w-6 px-0" title="Zoom out" aria-label="Zoom out" onClick={() => zoomTo(zoom / 1.25)}><ZoomOut className="h-3.5 w-3.5" /></Button>
+            <input type="range" min={1} max={MAX_ZOOM} value={zoom} aria-label="Zoom" onChange={(e) => zoomTo(Number(e.target.value))} className="w-20 accent-[var(--primary)]" />
+            <Button variant="ghost" size="sm" className="h-6 w-6 px-0" title="Zoom in" aria-label="Zoom in" onClick={() => zoomTo(Math.max(zoom + 1, zoom * 1.25))}><ZoomIn className="h-3.5 w-3.5" /></Button>
+            <span className="w-8 tabular-nums">{zoom}×</span>
+            <Button variant="ghost" size="sm" className="h-6 px-1 text-[11px]" title="Fit the texture into the panel" onClick={() => {
+              const el = textureScrollRef.current;
+              if (el) zoomTo(Math.max(1, Math.floor(Math.min((el.clientWidth - 24) / W, (el.clientHeight - 24) / H))));
+            }}>Fit</Button>
+          </div>
           <Button variant="ghost" size="sm" className={`ml-auto h-7 w-7 px-0 ${showUv ? "text-primary" : ""}`} title="Show UV layout" aria-pressed={showUv} onClick={() => setShowUv((v) => !v)}>
             <Grid3x3 className="h-4 w-4" />
           </Button>
         </div>
-        <div className="flex-1 overflow-auto p-3">
+        <div ref={textureScrollRef} className="flex-1 overflow-auto p-3" data-testid="skin-texture-scroll">
           <div className="relative" style={{ width: W * zoom, height: H * zoom, background: "repeating-conic-gradient(#3a3a3a 0% 25%, #2e2e2e 0% 50%) 0 0 / 16px 16px" }}>
             <canvas
               ref={(el) => { canvasRef.current = el; if (el !== canvasEl) setCanvasEl(el); }}

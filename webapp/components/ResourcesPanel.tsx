@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Upload, FolderPlus, Folder, FolderOpen, Images, Inbox, Search, Pencil, Trash2, Download, Paintbrush, X,
-  Copy,
+  Copy, Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useTextures } from "@/lib/TextureContext";
 import { downloadTexture } from "@/lib/textureDownload";
+import AiRemakeFolderDialog from "@/components/AiRemakeFolderDialog";
+import ResourceDownscale from "@/components/ResourceDownscale";
 import {
   useResourceFolders, createFolder, renameFolder, deleteFolder, moveToFolder, renameAssignedKey, forgetKey,
 } from "@/lib/resourceFolders";
@@ -47,6 +49,7 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
   const [renaming, setRenaming] = useState<{ from: string; value: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [dims, setDims] = useState<{ key: string; w: number; h: number } | null>(null);
+  const [remakeOpen, setRemakeOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allKeys = Object.keys(packTextures).filter((k) => k.startsWith("custom/")).sort();
@@ -275,6 +278,11 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-7 w-44 pl-7 text-xs" />
           </div>
+          {currentFolder && countIn(currentFolder) > 0 && (
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setRemakeOpen(true)} title={`Redraw every image in “${currentFolder}” with AI — saved as <name>_ai into “${currentFolder}_ai”`}>
+              <Wand2 className="h-3.5 w-3.5" /> Remake with AI
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => onNewTexture(currentFolder)} title={`Paint a new texture in the Texture Editor${currentFolder ? ` — saved into “${currentFolder}”` : ""}`}>
             <Paintbrush className="h-3.5 w-3.5" /> New texture
           </Button>
@@ -377,6 +385,7 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
               {folders.map((f) => <option key={f} value={f}>{f}</option>)}
             </select>
           </label>
+          <ResourceDownscale keys={liveSelected} onDone={setSelected} />
           <div className="flex flex-col gap-1.5">
             {focusKey && (
               <>
@@ -401,6 +410,15 @@ export default function ResourcesPanel({ onEditTexture, onNewTexture }: {
             </Button>
           </div>
         </aside>
+      )}
+
+      {currentFolder && (
+        <AiRemakeFolderDialog
+          folder={currentFolder}
+          keys={allKeys.filter((k) => folderOf(k) === currentFolder)}
+          open={remakeOpen}
+          onOpenChange={setRemakeOpen}
+        />
       )}
     </div>
   );

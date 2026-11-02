@@ -297,3 +297,21 @@ test("model editor: Block import — a chest skin brings the chest geometry and 
     await page.getByTestId("model-viewport").screenshot({ path: `${process.env.SHOT_DIR}/chest-entity.png` });
   }
 });
+
+test("model editor: skin tab zooms the flat texture with the buttons and the mouse wheel", async ({ page }) => {
+  await newModel(page);
+  await page.getByRole("tab", { name: "Skin" }).click();
+  const canvas = page.getByTestId("skin-canvas");
+  const width = async () => (await canvas.boundingBox())!.width;
+  const start = await width();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect.poll(width).toBeGreaterThan(start);
+  const box = (await page.getByTestId("skin-texture-scroll").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const before = await width();
+  await page.mouse.wheel(0, -300);
+  await expect.poll(width).toBeGreaterThan(before);
+  await page.mouse.wheel(0, 300);
+  await page.mouse.wheel(0, 300);
+  await expect.poll(width).toBeLessThan(before);
+});

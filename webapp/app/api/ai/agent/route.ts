@@ -155,7 +155,15 @@ export async function POST(request: Request) {
     "Translate the look into Minecraft's blocky cube style, but keep every recognisable feature.",
   ].join("\n");
 
-  const ctx = (body.context ?? {}) as { activeElement?: { kind?: string; id?: string } | null; referenceModel?: { name?: unknown; summary?: unknown; kind?: unknown } };
+  const ctx = (body.context ?? {}) as { activeElement?: { kind?: string; id?: string } | null; referenceModel?: { name?: unknown; summary?: unknown; kind?: unknown }; target?: { kind?: unknown; size?: unknown } };
+  const blockSize = ctx.target?.kind === "block" && Array.isArray(ctx.target.size) && ctx.target.size.length === 3
+    ? ctx.target.size.map((n) => Math.max(1, Math.min(64, Math.round(Number(n)) || 1))) : null;
+  const blockTask = !blockSize ? "" : "\n\n" + [
+    `This is a BLOCK, not a mob: build a placeable block of ${blockSize.join("×")} blocks (W×H×D) = ${blockSize.map((n) => n * 16).join("×")} px.`,
+    `Coordinates (1 px = 1/16 block): the placed block is x -8..8, y 0..16, z -8..8; the whole model must stay inside x -8..${-8 + 16 * blockSize[0]}, y 0..${16 * blockSize[1]}, z -8..${-8 + 16 * blockSize[2]}. The front faces north (-Z).`,
+    "create_model(template \"empty\"), one bone with pivot [0,0,0] and NO bone rotation; build it from axis-aligned cubes (a cube may turn around ONE axis by ±22.5° or ±45° only).",
+    "No animations, no entity settings. pack_uv, paint the texture, screenshot and fix, then call create_block_from_model(model, display_name, …) — it makes the block (a multiblock when bigger than one block) and reports warnings to fix.",
+  ].join("\n");
   const reference = ctx.referenceModel && typeof ctx.referenceModel.summary === "string" && ctx.referenceModel.kind === "mesh"
     ? `\n\nReference 3D mesh "${String(ctx.referenceModel.name ?? "reference").slice(0, 80)}" (an STL/OBJ/GLB/3MF file the user uploaded), converted into a voxel approximation in the mc-designer coordinates — boxes with from/size in pixels, scaled so the longest side is 32 px, standing on Y=0 and facing north (-Z):\n${ctx.referenceModel.summary.slice(0, 60_000)}\n` +
       "Rebuild its shape as a clean Minecraft-style entity model: group it into sensible bones (body, head, legs, arms, tail…) with pivots at the joints, and merge the voxel boxes into far fewer, larger cubes — the voxels are a measurement, not cubes to copy one by one. Rescale if the request asks for a different size. Renders of the mesh are among the attached images."
@@ -165,7 +173,7 @@ export async function POST(request: Request) {
     : "";
   const active = (ctx.activeElement?.kind && ctx.activeElement.id
     ? `\n(Currently open in the editor: ${ctx.activeElement.kind} "${ctx.activeElement.id}" — edit it only if the request refers to it.)`
-    : "") + reference;
+    : "") + reference + blockTask;
   const port = await freePort();
   const dir = await mkdtemp(join(tmpdir(), "mc-ui-agent-"));
   const mcpEnv = { MC_DESIGNER_MCP_PORT: String(port) };

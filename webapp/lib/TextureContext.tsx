@@ -44,6 +44,8 @@ interface TextureCtx {
   renameCustomTexture: (key: string, newStem: string) => Promise<string>;
   /** Copies a texture (custom or pack) to a new custom texture "<name>_copy" — returns its key. */
   duplicateCustomTexture: (key: string) => Promise<string>;
+  /** Overwrites a custom texture's image in place (same key, so items/blocks using it follow). */
+  replaceCustomTexture: (key: string, blob: Blob) => Promise<void>;
   extractPack: (file: File) => Promise<ExtractResult>;
   reload: () => Promise<void>;
   reset: () => Promise<void>;
@@ -60,6 +62,7 @@ const Ctx = createContext<TextureCtx>({
   deleteCustomTexture: async () => {},
   renameCustomTexture: async () => "",
   duplicateCustomTexture: async () => "",
+  replaceCustomTexture: async () => {},
   extractPack: async () => ({ extracted: [], missing: [] }),
   reload: async () => {},
   reset: async () => {},
@@ -200,6 +203,12 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
     return newKey;
   };
 
+  const replaceCustomTexture = async (key: string, blob: Blob): Promise<void> => {
+    if (!key.startsWith("custom/")) throw new Error(`Only custom textures can be replaced ("${key}")`);
+    await saveTexture(`pack:${key}`, blob);
+    applyBlobs(await loadAllTextures());
+  };
+
   const renameCustomTexture = async (key: string, newStem: string): Promise<string> => {
     if (!key.startsWith("custom/")) return key;
     const blobs = await loadAllTextures();
@@ -244,7 +253,7 @@ export function TextureProvider({ children }: { children: React.ReactNode }) {
   return (
     <Ctx.Provider value={{
       textures, packTextures, ready, initialized, setupRequired, uploadFiles, uploadCustomTexture,
-      deleteCustomTexture, renameCustomTexture, duplicateCustomTexture, extractPack: extractPackFn, reload, reset,
+      deleteCustomTexture, renameCustomTexture, duplicateCustomTexture, replaceCustomTexture, extractPack: extractPackFn, reload, reset,
     }}>
       {children}
     </Ctx.Provider>

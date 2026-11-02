@@ -55,7 +55,7 @@ test("attribute pickers show namespaces; a custom attribute opens in its editor 
   await seedTextures(page);
   await seedProject(page, { id: "main", width: 320, height: 180, modId: "mymod", widgets: [] });
   await openEditor(page);
-  await page.getByTitle("Custom Attributes", { exact: true }).click();
+  await page.getByTitle("Attributes", { exact: true }).click();
   await page.getByTestId("category-view").getByRole("button", { name: "New" }).first().click();
   const attrPanel = page.locator("div:has(> :text-is('Custom Attribute'))").first();
   await expect(attrPanel).toContainText("mymod:");
@@ -107,4 +107,20 @@ test("an enchantment can be incompatible with several groups, vanilla and custom
   await field.getByTitle("Remove Fire Aspect").click();
   await field.getByTitle("Remove Sharpness/Smite/…").click();
   await expect(page.getByText('"exclusive_set": "mymod:frost_bite"')).toBeVisible();
+});
+
+test("enchantment mob-effect picker lists the project's custom effects", async ({ page }) => {
+  await seedTextures(page);
+  await seedProject(page, { id: "main", width: 320, height: 180, modId: "mymod", widgets: [] });
+  await openEditor(page);
+  await page.getByTitle("Effects", { exact: true }).click();
+  await page.getByTestId("category-view").getByRole("button", { name: "New" }).first().click();
+  await page.locator("div:has(> :text-is('Display Name')) input").first().fill("Frenzy");
+
+  await page.getByTitle("Enchantments", { exact: true }).click();
+  await page.getByTestId("category-view").getByRole("button", { name: "New" }).first().click();
+  const editor = page.getByTestId("element-editor");
+  await editor.locator('[data-field="kind"] select').first().selectOption("effect_on_hit");
+  const picker = editor.locator('[data-field="mobEffect"] select').first();
+  await expect(picker.locator("option[value='mymod:frenzy']")).toHaveCount(1);
 });

@@ -11,8 +11,9 @@ the same way:
   /generate_block        (prompt, count, steps, guidance, seed, engine, tileable, size)  -- see block_texture.py
   /generate_player_skin  (prompt, count, steps, guidance, seed)   -- see player_skin.py
   /generate_armor        (material, count, steps, guidance, seed)  -- see armor.py
-  /generate_gui          (sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate)  -- see gui_texture.py
-(the last four exist only locally, not on the Space)
+  /generate_gui          (sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate, style)  -- see gui_texture.py
+  /generate_pixai_item   (prompt, count, steps, guidance, seed, size)  -- see pixai.py
+(the last five exist only locally, not on the Space)
   /status                () -> {"device", "model", "dtype"}
 
 Each returns (previews, files); the files are the finished 16x16 RGBA PNGs (64x64 skins for
@@ -37,6 +38,7 @@ from diffusers import DPMSolverMultistepScheduler, StableDiffusionImg2ImgPipelin
 import armor
 import block_texture
 import gui_texture
+import pixai
 import player_skin
 
 MODEL = os.environ.get("SKIN_GENERATOR_MODEL", "yuuki14202028/minecraft-item-16px")
@@ -107,6 +109,27 @@ def generator(seed, n=None):
         torch.Generator(device="cpu").manual_seed(seed)
 
 
+MAX_IMAGES = 64
+MAX_BATCH_SIZE = 8
+
+
+def in_batches(count, seed, batch, run):
+    """Like A1111's batch count x batch size: `count` images in total, generated `batch` at a time
+    in parallel (one pipe call), the batches one after another. run(n, seed) -> images; each batch
+    after the first gets seed + its index so a fixed seed doesn't repeat the same images."""
+    count = max(1, min(int(count), MAX_IMAGES))
+    batch = max(1, min(int(batch), MAX_BATCH_SIZE))
+    seed = int(seed)
+    images = []
+    for i, start in enumerate(range(0, count, batch)):
+        try:
+            images += run(min(batch, count - start), seed if seed < 0 else seed + i)
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            raise gr.Error(f"Out of GPU memory with batch size {batch} — lower the batch size (parallel images).")
+    return images
+
+
 def pack(images, prompts):
     previews, files = [], []
     tmp = Path(tempfile.mkdtemp())
@@ -121,25 +144,27 @@ def pack(images, prompts):
 
 
 @torch.inference_mode()
-def generate(prompt, count, steps, guidance, seed):
+def generate(prompt, count, steps, guidance, seed, batch_size=8):
     if not prompt.strip():
         raise gr.Error("Enter a prompt. For example: copper sword")
-    n = int(count)
-    images = pipe([prompt] * n, negative_prompt=[""] * n, num_inference_steps=int(steps),
-                  guidance_scale=float(guidance), height=256, width=256, generator=generator(seed)).images
-    return pack(images, [prompt] * n)
+    images = in_batches(count, seed, batch_size, lambda n, s: pipe(
+        [prompt] * n, negative_prompt=[""] * n, num_inference_steps=int(steps),
+        guidance_scale=float(guidance), height=256, width=256, generator=generator(s)).images)
+    return pack(images, [prompt] * len(images))
 
 
 @torch.inference_mode()
-def generate_from_sketch(sketch, prompt, count, strength, steps, guidance, seed):
+def generate_from_sketch(sketch, prompt, count, strength, steps, guidance, seed, batch_size=8):
     src = editor_image(sketch)
     if src is None:
         raise gr.Error("Draw something, or load an image.")
     if not prompt.strip():
         raise gr.Error("Enter a prompt. For example: steel wrench")
-    images = i2i(prompt=prompt, image=to_init(src), strength=float(strength), negative_prompt="",
-                 num_inference_steps=int(steps), guidance_scale=float(guidance),
-                 num_images_per_prompt=int(count), generator=generator(seed)).images
+    init = to_init(src)
+    images = in_batches(count, seed, batch_size, lambda n, s: i2i(
+        prompt=prompt, image=init, strength=float(strength), negative_prompt="",
+        num_inference_steps=int(steps), guidance_scale=float(guidance),
+        num_images_per_prompt=n, generator=generator(s)).images)
     return pack(images, [prompt] * len(images))
 
 
@@ -170,16 +195,27 @@ def save_files(images, prompt, fallback):
     return [im.resize((256, 256), Image.Resampling.NEAREST) for im in images], files
 
 
-def generate_block(prompt, count, steps, guidance, seed, engine, tileable, size=16):
+def generate_block(prompt, count, steps, guidance, seed, engine, tileable, size=16, batch_size=4):
     if not prompt.strip():
         raise gr.Error("Enter a prompt. For example: mossy stone bricks")
-    if engine not in ("item", "lora", "lora119", "sd15"):
+    if engine not in ("item", "lora", "lora119", "sd15", "pixai"):
         raise gr.Error("Unknown engine")
     try:
-        tiles = block_texture.generate(pipe, engine, prompt, count, steps, guidance, seed, bool(tileable), DEVICE, DTYPE, int(size))
+        tiles = in_batches(count, seed, batch_size, lambda n, s: block_texture.generate(
+            pipe, engine, prompt, n, steps, guidance, s, bool(tileable), DEVICE, DTYPE, int(size)))
     except ValueError as e:
         raise gr.Error(str(e))
     return save_files(tiles, prompt, "block")
+
+
+def generate_pixai_item(prompt, count, steps, guidance, seed, size=16, batch_size=4):
+    if not prompt.strip():
+        raise gr.Error("Enter a prompt. For example: copper sword")
+    try:
+        icons = in_batches(count, seed, batch_size, lambda n, s: pixai.items(prompt, n, steps, guidance, s, size, DEVICE, DTYPE))
+    except ValueError as e:
+        raise gr.Error(str(e))
+    return save_files(icons, prompt, "item")
 
 
 def generate_player_skin(prompt, count, steps, guidance, seed):
@@ -215,7 +251,7 @@ def generate_armor(material, count, steps, guidance, seed):
     return previews, files
 
 
-def generate_gui(sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate):
+def generate_gui(sketch, prompt, count, strength, steps, guidance, seed, width, height, pixelate, style="sd15"):
     """GUI textures: from text at width x height, or restyling `sketch` (an existing GUI texture,
     kept at its own size and transparency)."""
     if not prompt.strip():
@@ -224,7 +260,7 @@ def generate_gui(sketch, prompt, count, strength, steps, guidance, seed, width, 
     if src is None and not (16 <= int(width) <= 512 and 16 <= int(height) <= 512):
         raise gr.Error("Size must be between 16 and 512")
     images = gui_texture.generate(prompt, count, steps, guidance, seed, width, height, src, strength,
-                                  bool(pixelate), DEVICE, DTYPE)
+                                  bool(pixelate), DEVICE, DTYPE, "pixai" if style == "pixai" else "sd15")
     return save_files(images, prompt, "gui")
 
 
@@ -238,19 +274,21 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
                 "Driven from the webapp; this page is only for testing.")
     with gr.Tab("From text"):
         prompt = gr.Textbox(label="Prompt", value="copper sword")
-        count = gr.Slider(1, 8, value=4, step=1, label="Images")
+        count = gr.Slider(1, MAX_IMAGES, value=4, step=1, label="Images (total)")
+        batch = gr.Slider(1, MAX_BATCH_SIZE, value=4, step=1, label="Batch size (in parallel)")
         steps = gr.Slider(10, 50, value=30, step=1, label="Steps")
         guidance = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance")
         seed = gr.Number(value=0, precision=0, label="Seed (-1 for random)")
         run = gr.Button("Generate", variant="primary")
         gallery = gr.Gallery(columns=4, height=300)
         files = gr.Files(label="16x16 PNG")
-        run.click(generate, [prompt, count, steps, guidance, seed], [gallery, files], api_name="generate")
+        run.click(generate, [prompt, count, steps, guidance, seed, batch], [gallery, files], api_name="generate")
     with gr.Tab("From a drawing"):
         sketch = gr.ImageEditor(type="pil", image_mode="RGBA", canvas_size=(256, 256), fixed_canvas=True,
                                 layers=False, transforms=[], sources=("upload", "clipboard"))
         s_prompt = gr.Textbox(label="Prompt", value="steel wrench")
-        s_count = gr.Slider(1, 8, value=4, step=1, label="Images")
+        s_count = gr.Slider(1, MAX_IMAGES, value=4, step=1, label="Images (total)")
+        s_batch = gr.Slider(1, MAX_BATCH_SIZE, value=4, step=1, label="Batch size (in parallel)")
         s_strength = gr.Slider(0.3, 0.95, value=0.6, step=0.05, label="Strength")
         s_steps = gr.Slider(10, 50, value=40, step=1, label="Steps")
         s_guidance = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance")
@@ -258,7 +296,7 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
         s_run = gr.Button("Generate", variant="primary")
         s_gallery = gr.Gallery(columns=4, height=300)
         s_files = gr.Files(label="16x16 PNG")
-        s_run.click(generate_from_sketch, [sketch, s_prompt, s_count, s_strength, s_steps, s_guidance, s_seed],
+        s_run.click(generate_from_sketch, [sketch, s_prompt, s_count, s_strength, s_steps, s_guidance, s_seed, s_batch],
                     [s_gallery, s_files], api_name="generate_from_sketch")
     with gr.Tab("A whole set"):
         t_sketch = gr.ImageEditor(type="pil", image_mode="RGBA", canvas_size=(256, 256), fixed_canvas=True,
@@ -276,18 +314,32 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
                     [t_gallery, t_files], api_name="generate_tier_set")
     with gr.Tab("Block"):
         b_prompt = gr.Textbox(label="Prompt", value="mossy stone bricks")
-        b_engine = gr.Radio(["item", "lora", "lora119", "sd15"], value="item", label="Engine")
+        b_engine = gr.Radio(["item", "lora", "lora119", "sd15", "pixai"], value="item", label="Engine")
         b_tile = gr.Checkbox(value=True, label="Seamless")
-        b_size = gr.Dropdown([16, 32, 64, 128, 256], value=16, label="Size (item engine: 16 only)")
-        b_count = gr.Slider(1, 8, value=4, step=1, label="Images")
+        b_size = gr.Dropdown(list(pixai.SIZES), value=16, label="Size (item engine: 16 only, pixai: up to 4096)")
+        b_count = gr.Slider(1, MAX_IMAGES, value=4, step=1, label="Images (total)")
+        b_batch = gr.Slider(1, MAX_BATCH_SIZE, value=4, step=1, label="Batch size (in parallel)")
         b_steps = gr.Slider(10, 50, value=30, step=1, label="Steps")
         b_guidance = gr.Slider(1.0, 15.0, value=9.0, step=0.5, label="Guidance")
         b_seed = gr.Number(value=0, precision=0, label="Seed")
         b_run = gr.Button("Generate", variant="primary")
         b_gallery = gr.Gallery(columns=4, height=300)
         b_files = gr.Files(label="PNG")
-        b_run.click(generate_block, [b_prompt, b_count, b_steps, b_guidance, b_seed, b_engine, b_tile, b_size],
+        b_run.click(generate_block, [b_prompt, b_count, b_steps, b_guidance, b_seed, b_engine, b_tile, b_size, b_batch],
                     [b_gallery, b_files], api_name="generate_block")
+    with gr.Tab("Pixel AI item"):
+        x_prompt = gr.Textbox(label="Prompt", value="copper sword")
+        x_size = gr.Dropdown(list(pixai.SIZES), value=32, label="Size")
+        x_count = gr.Slider(1, MAX_IMAGES, value=4, step=1, label="Images (total)")
+        x_batch = gr.Slider(1, MAX_BATCH_SIZE, value=4, step=1, label="Batch size (in parallel)")
+        x_steps = gr.Slider(10, 50, value=30, step=1, label="Steps")
+        x_guidance = gr.Slider(1.0, 15.0, value=7.0, step=0.5, label="Guidance")
+        x_seed = gr.Number(value=0, precision=0, label="Seed")
+        x_run = gr.Button("Generate", variant="primary")
+        x_gallery = gr.Gallery(columns=4, height=300)
+        x_files = gr.Files(label="PNG")
+        x_run.click(generate_pixai_item, [x_prompt, x_count, x_steps, x_guidance, x_seed, x_size, x_batch], [x_gallery, x_files],
+                    api_name="generate_pixai_item")
     with gr.Tab("Armor"):
         a_material = gr.Textbox(label="Material", value="ruby")
         a_count = gr.Slider(1, 4, value=1, step=1, label="Sets")
@@ -310,10 +362,11 @@ with gr.Blocks(title="Item Skin Generator (local)") as demo:
         g_w = gr.Number(value=176, precision=0, label="Width (text only)")
         g_h = gr.Number(value=166, precision=0, label="Height (text only)")
         g_pix = gr.Checkbox(value=True, label="Pixel art palette")
+        g_style = gr.Radio(["sd15", "pixai"], value="sd15", label="Material style")
         g_run = gr.Button("Generate", variant="primary")
         g_gallery = gr.Gallery(columns=4, height=300)
         g_files = gr.Files(label="PNG")
-        g_run.click(generate_gui, [g_sketch, g_prompt, g_count, g_strength, g_steps, g_guidance, g_seed, g_w, g_h, g_pix],
+        g_run.click(generate_gui, [g_sketch, g_prompt, g_count, g_strength, g_steps, g_guidance, g_seed, g_w, g_h, g_pix, g_style],
                     [g_gallery, g_files], api_name="generate_gui")
     with gr.Tab("Player skin"):
         p_prompt = gr.Textbox(label="Prompt", value="a knight in golden armor")

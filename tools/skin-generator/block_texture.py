@@ -140,6 +140,10 @@ def downscale(image: Image.Image, size: int) -> Image.Image:
 def generate(item_pipe, engine, prompt, count, steps, guidance, seed, tileable, device, dtype, size=16):
     n = int(count)
     size = int(size)
+    if engine == "pixai":
+        import pixai
+        size = pixai.check_size(size)
+        return [pixai.scale(im.convert("RGBA"), size) for im in pixai.textures(prompt, n, steps, guidance, seed, tileable, device, dtype)]
     if size not in SIZES:
         raise ValueError(f"size must be one of {SIZES}")
     gen = None if int(seed) < 0 else torch.Generator(device="cpu").manual_seed(int(seed))

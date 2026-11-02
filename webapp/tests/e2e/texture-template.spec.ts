@@ -43,9 +43,9 @@ test("texture editor: From template builds tinted layers (MCreator style)", asyn
   await dialog.getByRole("button", { name: "Create", exact: true }).click();
   await expect(dialog).toBeHidden();
   // On a blank texture the template replaces the empty "Layer 1" (top of the stack listed first).
-  const layerNames = page.locator('input[class*="truncate"]');
+  const layerNames = page.locator("[data-layer-name]");
   await expect(layerNames).toHaveCount(2);
-  expect(await layerNames.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).toEqual(["tool_sword", "tool_base_stick"]);
+  expect(await layerNames.evaluateAll((els) => els.map((e) => e.textContent))).toEqual(["tool_sword", "tool_base_stick"]);
 
   // Painting on the lower layer where the upper one is opaque: the editor says why nothing shows.
   await layerNames.nth(1).locator("..").click({ position: { x: 2, y: 4 } });

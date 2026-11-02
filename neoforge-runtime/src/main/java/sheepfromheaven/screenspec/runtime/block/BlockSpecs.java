@@ -1,6 +1,10 @@
 package sheepfromheaven.screenspec.runtime.block;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.level.material.PushReaction;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
@@ -50,7 +54,9 @@ public final class BlockSpecs {
         self.add(chestType);
         for (BlockSpec spec : specs) {
             DeferredBlock<Block> block;
-            if ("chest".equals(spec.model)) {
+            if ("custom".equals(spec.model) && spec.parts != null && !spec.parts.isEmpty()) {
+                block = registerModelBlock(blockRegister, spec);
+            } else if ("chest".equals(spec.model)) {
                 block = (DeferredBlock<Block>) (DeferredBlock<?>) blockRegister.registerBlock(spec.id,
                     p -> new SpecChestBlock(() -> (BlockEntityType<? extends ChestBlockEntity>) chestType.get(), spec.displayName, p),
                     () -> buildProperties(spec));
@@ -70,6 +76,47 @@ public final class BlockSpecs {
             }
         }
         return result;
+    }
+
+    /**
+     * A {@link SpecModelBlock} group: the main block {@code <id>} plus, for a multiblock, one part
+     * block per further cell. The pieces share one list of (offset, block) — filled before any
+     * factory runs, since DeferredRegister builds the blocks later.
+     */
+    @SuppressWarnings("unchecked")
+    private static DeferredBlock<Block> registerModelBlock(DeferredRegister.Blocks blockRegister, BlockSpec spec) {
+        List<SpecModelBlock.Piece> group = new ArrayList<>();
+        DeferredBlock<Block> main = null;
+        for (BlockSpec.Part part : spec.parts) {
+            BlockPos offset = part.offset != null && part.offset.length == 3 ? new BlockPos(part.offset[0], part.offset[1], part.offset[2]) : BlockPos.ZERO;
+            VoxelShape shape = Shapes.empty();
+            if (part.boxes != null) for (double[] b : part.boxes) {
+                if (b == null || b.length != 6) continue;
+                shape = Shapes.or(shape, Block.box(clamp(b[0]), clamp(b[1]), clamp(b[2]), clamp(b[3]), clamp(b[4]), clamp(b[5])));
+            }
+            VoxelShape finalShape = shape;
+            DeferredBlock<Block> block = (DeferredBlock<Block>) (DeferredBlock<?>) blockRegister.registerBlock(partId(spec.id, offset),
+                p -> SpecModelBlock.create(p, offset, group, finalShape),
+                () -> buildProperties(spec).noOcclusion().pushReaction(PushReaction.BLOCK));
+            group.add(new SpecModelBlock.Piece(offset, block));
+            if (offset.equals(BlockPos.ZERO)) main = block;
+        }
+        if (main == null) throw new IllegalStateException("custom block " + spec.id + " has no part at offset 0,0,0");
+        return main;
+    }
+
+    /** Same naming as the webapp's partBlockId: {@code <id>_p_1_0_m2}; offset 0,0,0 is the block itself. */
+    static String partId(String id, BlockPos o) {
+        if (o.equals(BlockPos.ZERO)) return id;
+        return id + "_p_" + n(o.getX()) + "_" + n(o.getY()) + "_" + n(o.getZ());
+    }
+
+    private static String n(int v) {
+        return v < 0 ? "m" + (-v) : String.valueOf(v);
+    }
+
+    private static double clamp(double v) {
+        return Math.max(0, Math.min(16, v));
     }
 
     private static BlockBehaviour.Properties buildProperties(BlockSpec spec) {

@@ -181,7 +181,16 @@ export interface BlockSpec {
   /** "cube" (default): a full block with `texture`/`faceTextures`. "chest": a working chest
    * (27 slots, opening lid) — `texture` is then a 64×64 chest skin in the layout of vanilla
    * entity/chest/normal.png; face textures are ignored. Chests stay single (no double chests). */
-  model?: "cube" | "chest";
+  model?: "cube" | "chest" | "custom";
+  /** model "custom": id of an entity model (Models tab) drawn as the block — see
+   * lib/model3d/blockModel. Up to 16×16×16 px it's one block; bigger needs `multiblock`. */
+  customModel?: string;
+  /** model "custom": a model bigger than one block is cut into 16³ parts, each its own block —
+   * placed and broken together, turned to face the player. Off = only the first block is used. */
+  multiblock?: boolean;
+  /** export only (blocks.json, filled from `customModel`): the cells of the model, offset 0,0,0 =
+   * the placed block, each with its outline/collision boxes in pixels */
+  parts?: { offset: [number, number, number]; boxes: [number, number, number, number, number, number][] }[];
   hardness: number;
   resistance: number;
   requiresTool: boolean;
@@ -222,7 +231,16 @@ export interface EffectSpec {
   /** stat modifiers applied while the effect is active — same declarative mechanism as
    * ItemSpec.attributes, scaled per amplifier level by vanilla automatically */
   attributes?: AttributeModifierSpec[];
+  /** other effects (vanilla, e.g. "minecraft:blindness", or another project EffectSpec's bare id)
+   * kept on the entity for as long as this effect lasts — re-applied each second with this
+   * effect's remaining duration, removed again when this effect ends */
+  extraEffects?: EffectExtraEntry[];
   appVersion?: string;
+}
+
+export interface EffectExtraEntry {
+  effectId: string;
+  amplifier: number;
 }
 
 export interface PotionEffectEntry {

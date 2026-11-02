@@ -86,3 +86,35 @@ export async function toPngDataUrl(url: string): Promise<{ dataUrl: string; widt
   c.getContext("2d")!.drawImage(img, 0, 0);
   return { dataUrl: c.toDataURL("image/png"), width: c.width, height: c.height };
 }
+
+/**
+ * Downscales an image to width x height. "pixel": nearest neighbour (keeps hard pixel-art edges
+ * and colours); "smooth": halving steps with smoothing, so big reductions average instead of alias.
+ */
+export async function downscaleImage(url: string, width: number, height: number, method: "pixel" | "smooth"): Promise<Blob> {
+  const img = await loadImage(url);
+  let src: CanvasImageSource = img;
+  let sw = img.naturalWidth, sh = img.naturalHeight;
+  if (method === "smooth") {
+    while (sw / 2 >= width && sh / 2 >= height) {
+      const half = document.createElement("canvas");
+      half.width = Math.round(sw / 2);
+      half.height = Math.round(sh / 2);
+      const hctx = half.getContext("2d")!;
+      hctx.imageSmoothingEnabled = true;
+      hctx.imageSmoothingQuality = "high";
+      hctx.drawImage(src, 0, 0, half.width, half.height);
+      src = half;
+      sw = half.width;
+      sh = half.height;
+    }
+  }
+  const c = document.createElement("canvas");
+  c.width = width;
+  c.height = height;
+  const ctx = c.getContext("2d")!;
+  ctx.imageSmoothingEnabled = method === "smooth";
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, width, height);
+  return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not encode PNG"))), "image/png"));
+}

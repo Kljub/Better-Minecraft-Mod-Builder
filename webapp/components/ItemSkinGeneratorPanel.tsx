@@ -8,21 +8,26 @@ import TexturePickerModal from "@/components/TexturePickerModal";
 import { useTextures } from "@/lib/TextureContext";
 import SkinBackendControl, { loadSkinBackend, type SkinBackend } from "@/components/SkinBackendControl";
 import BannerPatternGenerator from "@/components/BannerPatternGenerator";
-import GeneratedResults, { CHECKER, SeedField, Slider, useSeed, type GeneratedImage, type Kind, type Target } from "@/components/GeneratedResults";
+import GeneratedResults, { BatchFields, CHECKER, SeedField, Slider, useSeed, type GeneratedImage, type Kind, type Target } from "@/components/GeneratedResults";
 import { referenceImage } from "@/components/EntityModelGeneratorPanel";
 import { aiClientLabel, aiGenerate, enabledAiClients, useAiSettings, type AiClientId } from "@/lib/aiSettings";
 import type { SkinDescription, SkinQuality, SkinRating } from "@/lib/ai/skinVision";
 
-type Mode = "text" | "sketch" | "set" | "player";
+type Mode = "text" | "pixai" | "sketch" | "set" | "player";
+
+/** Pixel AI output sizes: drawn at 512, box-downscaled below that, nearest-upscaled above */
+const PIXAI_SIZES = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096] as const;
 
 const MODES: { id: Mode; label: string; hint: string; localOnly?: boolean }[] = [
   { id: "text", label: "Item", hint: "A prompt in, 16×16 item textures out." },
+  { id: "pixai", label: "Pixel AI", hint: "The \"pixel ai style\" LoRA (SD 1.5): pixel-art illustrations, background cut away. Any power-of-two size — 16–256 downscaled, 1024+ upscaled pixel-exact. Not for commercial use.", localOnly: true },
   { id: "sketch", label: "From texture", hint: "You give the shape (an existing texture or a doodle), the model adds shading and material. Low strength keeps the base, high redraws it." },
   { id: "set", label: "Material set", hint: "One base design + a list of materials → a tier set with matching silhouettes (shared seed). Strength ≈ 0.5 keeps them aligned." },
   { id: "player", label: "Player skin", hint: "A character description in, a 64×64 player skin out (SDXL — the first run loads ~7 GB, then ~20 s per skin).", localOnly: true },
 ];
 
 const EXAMPLES: Partial<Record<Mode, string[]>> = {
+  pixai: ["copper sword", "ruby amulet", "magic staff", "health potion", "golden crown", "treasure chest"],
   text: ["copper sword", "glass hammer", "emerald key", "coffee cup", "glowing molten iron sword", "ruby pickaxe", "gold skull"],
   player: ["a knight in golden armor", "a wizard in a blue robe", "a robot with a red visor", "a pirate captain"],
 };
@@ -30,12 +35,13 @@ const EXAMPLES: Partial<Record<Mode, string[]>> = {
 /** per-mode defaults (the models' recommended settings) applied when switching modes */
 const DEFAULTS: Record<Mode, { prompt?: string; count: number; steps: number; guidance: number; strength?: number }> = {
   text: { prompt: "copper sword", count: 4, steps: 30, guidance: 9 },
+  pixai: { count: 4, steps: 30, guidance: 7 },
   sketch: { prompt: "steel wrench", count: 4, steps: 40, guidance: 9, strength: 0.6 },
   set: { count: 4, steps: 40, guidance: 9, strength: 0.5 },
   player: { prompt: "a knight in golden armor", count: 2, steps: 40, guidance: 7.5 },
 };
 
-const KIND_OF: Record<Mode, Kind> = { text: "item", sketch: "item", set: "item", player: "player" };
+const KIND_OF: Record<Mode, Kind> = { text: "item", pixai: "item", sketch: "item", set: "item", player: "player" };
 // Session-wide, so leaving the tab and coming back keeps the last results.
 let lastResults: GeneratedImage[] = [];
 /** AI quality ratings per result id (session-wide like the results) */
@@ -116,10 +122,14 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
   const [prompt, setPrompt] = useState("copper sword");
   const [noun, setNoun] = useState("sword");
   const [materials, setMaterials] = useState("wooden, stone, iron, golden, diamond, netherite");
+  /** images per run — the batch size in the batched modes */
   const [count, setCount] = useState(4);
+  /** runs one after another (batched modes only) */
+  const [batchCount, setBatchCount] = useState(1);
   const [steps, setSteps] = useState(30);
   const [guidance, setGuidance] = useState(9);
   const [strength, setStrength] = useState(0.6);
+  const [pixaiSize, setPixaiSize] = useState(32);
   const seedState = useSeed();
   const { seed } = seedState;
   const [base, setBase] = useState<{ label: string; url: string } | null>(null);
@@ -132,6 +142,8 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
     setResultsState((r) => (lastResults = fn(r)));
 
   const needsBase = mode === "sketch" || mode === "set";
+  /** modes with SD-style batch count × batch size (local server; the Space ignores the batch size) */
+  const batched = mode === "text" || mode === "pixai" || mode === "sketch";
   const localOnly = !!MODES.find((m) => m.id === mode)!.localOnly;
 
   const switchMode = (m: Mode) => {
@@ -153,8 +165,9 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          backend, mode, prompt: label, materials, count, steps, guidance, seed,
-          strength, sketch,
+          backend, mode, prompt: label, materials, steps, guidance, seed,
+          count: batched ? count * batchCount : count, batchSize: count,
+          strength, sketch, size: pixaiSize,
         }),
       });
       const data = (await res.json()) as { images?: { name: string; dataUrl: string }[]; error?: string };
@@ -164,7 +177,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       const batch = data.images.map((im, i): GeneratedImage => ({
         id: `${stamp}-${Math.random().toString(36).slice(2, 6)}-${i}`,
         kind: KIND_OF[mode],
-        size: mode === "player" ? 64 : 16,
+        size: mode === "player" ? 64 : mode === "pixai" ? pixaiSize : 16,
         name: im.name,
         dataUrl: im.dataUrl,
         prompt: mode === "set" ? `${mats[i] ?? ""} ${noun}`.trim() : label,
@@ -271,7 +284,7 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
       <div className="relative flex h-10 shrink-0 items-center gap-2 border-b bg-sidebar px-3">
         <Wand2 className="h-4 w-4 text-primary" />
         <span className="text-sm font-semibold">Item Skin Generator</span>
-        <span className="truncate text-xs text-muted-foreground">{MODEL_OF[KIND_OF[mode]]}</span>
+        <span className="truncate text-xs text-muted-foreground">{mode === "pixai" ? "pixel ai style LoRA (busy_men) · SD 1.5" : MODEL_OF[KIND_OF[mode]]}</span>
         <SkinBackendControl backend={backend} onBackend={setBackend} />
       </div>
 
@@ -452,7 +465,22 @@ export default function ItemSkinGeneratorPanel({ items, onApplyToItem, onOpenIte
             </label>
           )}
 
-          {mode !== "set" && <Slider label="Images" value={count} onChange={setCount} min={1} max={mode === "player" ? 4 : 8} step={1} />}
+          {mode === "pixai" && (
+            <div className="flex flex-col gap-1.5 text-xs">
+              <span className="text-muted-foreground">Size</span>
+              <div className="flex flex-wrap gap-0.5 rounded-sm border p-0.5" role="group" aria-label="Size">
+                {PIXAI_SIZES.map((s) => (
+                  <button key={s} type="button" onClick={() => setPixaiSize(s)}
+                    className={`h-6 flex-1 rounded-sm px-1 text-[11px] ${pixaiSize === s ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {batched
+            ? <BatchFields count={batchCount} size={count} onCount={setBatchCount} onSize={setCount} />
+            : mode === "player" && <Slider label="Images" value={count} onChange={setCount} min={1} max={4} step={1} />}
           {needsBase && <Slider label="Strength (low = keep base · high = redraw)" value={strength} onChange={setStrength} min={0.3} max={0.95} step={0.05} />}
           <Slider label="Steps" value={steps} onChange={setSteps} min={10} max={mode === "player" ? 60 : 50} step={1} />
           <Slider label="Guidance (7–12 works, 3–5 goes mushy)" value={guidance} onChange={setGuidance} min={1} max={15} step={0.5} />

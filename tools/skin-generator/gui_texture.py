@@ -27,8 +27,11 @@ RESTYLE_DETAIL = 0.4
 NEGATIVE = "perspective, frame, border, text, letters, watermark, blurry, person, screenshot"
 
 
-def _material(prompt, n, steps, guidance, seed, device, dtype):
-    """n seamless 512px material textures for `prompt`."""
+def _material(prompt, n, steps, guidance, seed, device, dtype, style="sd15"):
+    """n seamless 512px material textures for `prompt` (style "pixai": the Pixel AI LoRA, see pixai.py)."""
+    if style == "pixai":
+        import pixai
+        return pixai.textures(prompt, n, steps, guidance, seed, True, device, dtype, "seamless texture, flat top-down game texture")
     pipe = block_texture._lora(device, dtype)
     pipe.disable_lora()
     gen = None if int(seed) < 0 else torch.Generator(device="cpu").manual_seed(int(seed))
@@ -63,8 +66,8 @@ def _quantize(img: Image.Image, colors=24) -> Image.Image:
 
 
 @torch.inference_mode()
-def generate(prompt, count, steps, guidance, seed, width, height, sketch, strength, pixelate, device, dtype):
-    materials = _material(prompt, int(count), steps, guidance, seed, device, dtype)
+def generate(prompt, count, steps, guidance, seed, width, height, sketch, strength, pixelate, device, dtype, style="sd15"):
+    materials = _material(prompt, int(count), steps, guidance, seed, device, dtype, style)
     out = []
     for mat in materials:
         if sketch is not None:

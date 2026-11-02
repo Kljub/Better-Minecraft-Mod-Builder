@@ -1,7 +1,8 @@
 import { spawn } from "child_process";
+import { existsSync } from "fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "fs/promises";
 import { homedir, tmpdir } from "os";
-import { join } from "path";
+import { delimiter, join } from "path";
 import type { Quota, RunAccount } from "@/lib/server/aiAccounts";
 import { claudeQuota } from "@/lib/server/aiAccounts";
 
@@ -47,8 +48,25 @@ export function guardRequest(request: Request): Response | null {
   return null;
 }
 
+/**
+ * Where user-installed CLIs (claude, codex) usually live. A dev server started by a service or
+ * panel (not a login shell) often has a PATH without them — "spawn claude ENOENT". AI_CLI_PATH
+ * (":"-separated) adds more.
+ */
+function cliPath(path: string | undefined): string {
+  const home = homedir();
+  const extra = [
+    ...(process.env.AI_CLI_PATH?.split(delimiter) ?? []),
+    join(home, ".npm-global", "bin"), join(home, ".local", "bin"), join(home, ".claude", "local"),
+    join(home, "bin"), join(home, ".bun", "bin"), join(home, ".volta", "bin"), "/usr/local/bin", "/opt/homebrew/bin",
+  ];
+  const parts = (path ?? "").split(delimiter).filter(Boolean);
+  for (const dir of extra) if (dir && !parts.includes(dir) && existsSync(dir)) parts.push(dir);
+  return parts.join(delimiter);
+}
+
 export function childEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: cliPath(process.env.PATH) };
   // If the dev server itself was started from inside a Claude Code session, don't let the child
   // think it's nested in that session.
   delete env.CLAUDECODE;
@@ -192,7 +210,8 @@ export async function runStructured(
       await writeFile(file, Buffer.from(img.data, "base64"));
       args.push("-i", file);
     }
-    args.push("-");
+    // "--" ends -i (it takes several files), else codex would read "-" as one more image
+    args.push("--", "-");
     const imageList = images.length ? `\n\nAttached images, in order:\n${images.map((img, i) => `${i + 1}. ${img.label || "image"}`).join("\n")}` : "";
     // codex exec has no system-prompt flag — instructions go in front of the request.
     const { code, stdout, stderr } = await run("codex", args, { stdin: `${system}\n\n---\n\n${prompt}${imageList}`, cwd: dir, env: account?.env, timeoutMs });
@@ -219,7 +238,7 @@ export async function runCodexImage(prompt: string, count: number, image?: Buffe
       await writeFile(join(dir, "input.png"), image);
       args.push("-i", join(dir, "input.png"));
     }
-    args.push("-");
+    args.push("--", "-");
     const task = image
       ? `Use the image_gen tool ${count === 1 ? "once" : `exactly ${count} times (independent variations)`} to edit the attached image: ${prompt}`
       : `Use the image_gen tool ${count === 1 ? "once" : `exactly ${count} times (independent variations)`} to generate: ${prompt}`;
