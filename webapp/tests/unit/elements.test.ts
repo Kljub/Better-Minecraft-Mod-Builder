@@ -44,6 +44,29 @@ describe("enchantment", () => {
     expect(body.supported_items).toBe("#minecraft:enchantable/sharp_weapon");
     expect(body.description).toEqual({ translate: "enchantment.mymod.thing" });
   });
+  it("applies vanilla and custom mob effects, dropping deleted custom ones", () => {
+    const spec = make(ENCHANTMENT, {
+      effects: [
+        { kind: "effect_on_hit", base: 3, perLevel: 1, mobEffect: "minecraft:blindness", amplifier: 0, amplifierPerLevel: 1 },
+        { kind: "effect_on_self", mobEffect: "mymod:frenzy", amplifier: 1, amplifierPerLevel: 0 },
+        { kind: "effect_on_self", mobEffect: "mymod:deleted", amplifier: 0, amplifierPerLevel: 0 },
+      ],
+    });
+    const ectx = { ...ctx, elementIds: { mobEffect: ["mymod:frenzy"] } };
+    const body = JSON.parse(ENCHANTMENT.files(spec, ectx)[0].content as string);
+    expect(body.effects["minecraft:post_attack"][0]).toMatchObject({
+      affected: "victim", enchanted: "attacker",
+      effect: {
+        type: "minecraft:apply_mob_effect", to_apply: "minecraft:blindness",
+        min_duration: { type: "minecraft:linear", base: 3, per_level_above_first: 1 },
+        min_amplifier: { type: "minecraft:linear", base: 0, per_level_above_first: 1 },
+      },
+    });
+    expect(body.effects["minecraft:tick"]).toHaveLength(1);
+    expect(body.effects["minecraft:tick"][0].effect.to_apply).toBe("mymod:frenzy");
+    expect(ENCHANTMENT.validate!(spec, { ...vctx, elementIds: { mobEffect: ["mymod:frenzy"] } }))
+      .toContain("Mob effect mymod:deleted no longer exists — that effect is left out of the export.");
+  });
   it("non-treasure enchantments join the enchanting table via non_treasure only", () => {
     expect(ENCHANTMENT.shared!(make(ENCHANTMENT), vctx).tags).toEqual({ "data/minecraft/tags/enchantment/non_treasure.json": ["mymod:thing"] });
     const treasure = ENCHANTMENT.shared!(make(ENCHANTMENT, { treasure: true }), vctx).tags!;

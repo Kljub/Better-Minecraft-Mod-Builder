@@ -22,8 +22,21 @@ public final class CompanionConfig {
             .comment("Optional model name passed to the CLI (empty = its default)")
             .define("model", "");
     public static final ModConfigSpec.IntValue MAX_SIZE = BUILDER
-            .comment("Largest side of a generated structure, in blocks")
-            .defineInRange("maxSize", 48, 4, 128);
+            .comment("Largest width/length (x, z) of a generated structure, in blocks")
+            .defineInRange("maxSize", 48, 4, MmbCommands.MAX_SIDE);
+    public static final ModConfigSpec.IntValue MAX_HEIGHT = BUILDER
+            .comment("Largest height (y) of a generated structure, in blocks")
+            .defineInRange("maxHeight", 48, 4, MmbCommands.MAX_HEIGHT);
+
+    public static final ModConfigSpec.BooleanValue ONLY_IN_BUILD_WORLD = BUILDER
+            .comment("/mmb generate only works in the empty build world (/mmb world, /mmb leave) — the other worlds stay untouched")
+            .define("onlyInBuildWorld", true);
+    public static final ModConfigSpec.BooleanValue SPAWN_IN_BUILD_WORLD = BUILDER
+            .comment("Players land on the build world's bedrock block when they join and when they respawn (a server just for AI building)")
+            .define("spawnInBuildWorld", false);
+    public static final ModConfigSpec.IntValue PERMISSION_LEVEL = BUILDER
+            .comment("Who may use /mmb: 0 = every player (fine with onlyInBuildWorld on a server), 2 = operators (game masters), 4 = owners")
+            .defineInRange("permissionLevel", 2, 0, 4);
 
     public static final ModConfigSpec SPEC = BUILDER.build();
 

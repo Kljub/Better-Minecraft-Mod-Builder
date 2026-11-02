@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expandStructure, normalizeBlockState, structureId, validateAiStructure } from "../../lib/structureAi";
+import { expandStructure, normalizeBlockState, structureEditPrompt, structureId, validateAiStructure } from "../../lib/structureAi";
 
 const at = (blocks: number[], x: number, y: number, z: number) => {
   for (let i = 0; i < blocks.length; i += 4) if (blocks[i] === x && blocks[i + 1] === y && blocks[i + 2] === z) return blocks[i + 3];
@@ -39,11 +39,42 @@ describe("structure AI", () => {
     expect(new Set(s.palette).size).toBe(s.palette.length);
   });
 
+  it("keeps the ops compact for huge structures: 1024 wide/long, 256 high", () => {
+    const s = expandStructure(validateAiStructure({
+      name: "castle", description: "", size: [2000, 400, 1024],
+      ops: [
+        { op: "fill", from: [0, 0, 0], to: [1023, 0, 1023], block: "stone" },
+        { op: "walls", from: [0, 1, 0], to: [1023, 300, 1023], block: "stone_bricks" },
+        { op: "set", from: [5, 0, 5], to: [5, 0, 5], block: "air" },
+      ],
+    }));
+    expect(s.size).toEqual([1024, 256, 1024]);
+    expect(s.ops).toEqual([
+      0, 0, 0, 0, 1023, 0, 1023, 0,
+      2, 0, 1, 0, 1023, 255, 1023, 1,
+      3, 5, 0, 5, 5, 0, 5, -1,
+    ]);
+    expect(s.blockCount).toBe(1024 * 1024 - 1 + 255 * (4 * 1024 - 4));
+    expect(s.blocks).toEqual([]); // too many to list — the mod replays the ops
+  });
+
   it("caps the size at maxSize and refuses empty answers", () => {
     const s = expandStructure(validateAiStructure({ name: "big", description: "", size: [500, 10, 3], ops: [{ op: "fill", from: [0, 0, 0], to: [999, 0, 0], block: "stone" }] }), 32);
     expect(s.size).toEqual([32, 10, 3]);
     expect(s.blocks.length / 4).toBe(32);
+    expect(s.blockCount).toBe(32);
     expect(() => validateAiStructure({ name: "x", size: [1, 1, 1], ops: [] })).toThrow();
     expect(structureId("  ")).toBe("structure");
+  });
+
+  it("edit prompts list the existing ops and the fixed size", () => {
+    const text = structureEditPrompt("add a bridge", {
+      name: "island", size: [64, 20, 32],
+      ops: [{ op: "fill", from: [0, 0, 0], to: [63, 0, 31], block: "minecraft:grass_block" }, { op: "set", from: [5, 1, 5], to: [9, 9, 9], block: "minecraft:torch" }],
+    });
+    expect(text).toContain("size [64, 20, 32] (fixed)");
+    expect(text).toContain("fill 0,0,0 63,0,31 minecraft:grass_block");
+    expect(text).toContain("set 5,1,5 5,1,5 minecraft:torch");
+    expect(text.trim().endsWith("Change request: add a bridge")).toBe(true);
   });
 });

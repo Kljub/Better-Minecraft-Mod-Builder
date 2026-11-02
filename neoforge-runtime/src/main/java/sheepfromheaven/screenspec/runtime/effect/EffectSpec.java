@@ -33,4 +33,13 @@ public final class EffectSpec {
     /** Stat modifiers applied while the effect is active — same declarative mechanism as
      * {@code ItemSpec.attributes}, scaled per amplifier level by vanilla automatically. */
     public List<AttributeModifierSpec> attributes = Collections.emptyList();
+    /** Other effects kept on the entity for as long as this one lasts — see {@link EffectSpecs}. */
+    public List<ExtraEffect> extraEffects = Collections.emptyList();
+
+    /** Mirrors the webapp's {@code EffectExtraEntry}. */
+    public static final class ExtraEffect {
+        /** A vanilla effect id (e.g. {@code "minecraft:blindness"}) or a project {@link EffectSpec}'s bare id. */
+        public String effectId;
+        public int amplifier;
+    }
 }

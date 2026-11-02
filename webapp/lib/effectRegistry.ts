@@ -47,15 +47,18 @@ export const EFFECT_ADD_SOUND_OPTIONS = [
   "minecraft:block.beacon.activate", "minecraft:entity.witch.drink", "minecraft:entity.evoker.cast_spell",
 ];
 
-// Curated vanilla effect keys — namespaced, for the Potion effect-entry picker (a Potion's
-// effects list can mix these with project-defined EffectSpec ids).
+// All vanilla effect keys, in MobEffects registration order (checked via javap against the 26.2
+// jar) — namespaced, for the Potion effect-entry picker (a Potion's effects list can mix these
+// with project-defined EffectSpec ids). breath_of_the_nautilus only exists from 1.21.11 on.
 export const VANILLA_EFFECT_OPTIONS = [
   "minecraft:speed", "minecraft:slowness", "minecraft:haste", "minecraft:mining_fatigue",
   "minecraft:strength", "minecraft:instant_health", "minecraft:instant_damage", "minecraft:jump_boost",
   "minecraft:nausea", "minecraft:regeneration", "minecraft:resistance", "minecraft:fire_resistance",
   "minecraft:water_breathing", "minecraft:invisibility", "minecraft:blindness", "minecraft:night_vision",
   "minecraft:hunger", "minecraft:weakness", "minecraft:poison", "minecraft:wither", "minecraft:health_boost",
-  "minecraft:absorption", "minecraft:saturation", "minecraft:levitation", "minecraft:luck", "minecraft:unluck",
-  "minecraft:slow_falling", "minecraft:conduit_power", "minecraft:dolphins_grace", "minecraft:bad_omen",
-  "minecraft:hero_of_the_village", "minecraft:darkness",
+  "minecraft:absorption", "minecraft:saturation", "minecraft:glowing", "minecraft:levitation", "minecraft:luck",
+  "minecraft:unluck", "minecraft:slow_falling", "minecraft:conduit_power", "minecraft:dolphins_grace",
+  "minecraft:bad_omen", "minecraft:hero_of_the_village", "minecraft:darkness", "minecraft:trial_omen",
+  "minecraft:raid_omen", "minecraft:wind_charged", "minecraft:weaving", "minecraft:oozing", "minecraft:infested",
+  "minecraft:breath_of_the_nautilus",
 ];

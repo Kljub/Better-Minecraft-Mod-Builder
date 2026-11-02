@@ -5,8 +5,14 @@
  * mod places in the world and saves as a structure template (.nbt). The AI's output is never
  * trusted as-is: block ids are checked against a strict pattern, coordinates clamped to the size.
  */
-export const MAX_SIZE = 128;
-const MAX_OPS = 8000;
+/** Largest width/length (x, z) and height (y) of a generated structure, in blocks. */
+export const MAX_SIDE = 1024;
+export const MAX_HEIGHT = 256;
+const MAX_OPS = 20000;
+/** Sparse grid: at most this many 16³ sections hold blocks (≈ 128 MB) — refuses anything bigger. */
+const MAX_SECTIONS = 16384;
+/** Up to this many blocks also go out as an x,y,z,index list (training data, small structures). */
+export const INLINE_BLOCKS = 300_000;
 
 export type StructureOpKind = "fill" | "hollow" | "walls" | "set";
 const OP_KINDS: StructureOpKind[] = ["fill", "hollow", "walls", "set"];
@@ -14,16 +20,25 @@ const OP_KINDS: StructureOpKind[] = ["fill", "hollow", "walls", "set"];
 export interface StructureOp { op: StructureOpKind; from: [number, number, number]; to: [number, number, number]; block: string }
 export interface AiStructure { name: string; description: string; size: [number, number, number]; ops: StructureOp[] }
 
-/** The expanded structure: palette of block states, and x,y,z,paletteIndex quadruples (air left out). */
+/**
+ * The compiled structure: the palette of block states and the build ops (clamped, validated) as
+ * flat records of OP_STRIDE ints — kind (0 fill, 1 hollow, 2 walls, 3 set), x1,y1,z1, x2,y2,z2
+ * (inclusive, lo ≤ hi), palette index (-1 = air). The mod replays them in order. `blocks` is the
+ * expanded result as x,y,z,paletteIndex quadruples (air left out) — only up to INLINE_BLOCKS.
+ */
 export interface ExpandedStructure {
   name: string;
   description: string;
   size: [number, number, number];
   palette: string[];
+  ops: number[];
+  blockCount: number;
+  /** empty when blockCount > INLINE_BLOCKS */
   blocks: number[];
   /** block strings the AI used that don't look like block states (dropped) */
   rejected: string[];
 }
+export const OP_STRIDE = 8;
 
 const vec3 = { type: "array", items: { type: "integer" } } as const;
 
@@ -54,7 +69,7 @@ export const STRUCTURE_SYSTEM = [
   "Coordinates: integers, 0 ≤ x < size[0], 0 ≤ y < size[1], 0 ≤ z < size[2]. +X is east, +Y is up, +Z is south.",
   "y = 0 is the ground floor (the lowest layer, e.g. the foundation / floor). The FRONT (entrance) faces north, i.e. the z = 0 side;",
   "the tool turns the structure so the front faces the player.",
-  `Keep each side ≤ ${MAX_SIZE}; typical buildings are 7–25 wide.`,
+  `Keep width and length ≤ ${MAX_SIDE} and height ≤ ${MAX_HEIGHT}; typical buildings are 7–25 wide. Big builds (castles, cities) need few, large ops.`,
   "",
   "Ops run in order, later ops overwrite earlier ones:",
   "- fill: solid box from..to (inclusive corners).",
@@ -72,8 +87,10 @@ export const STRUCTURE_SYSTEM = [
   "pitched or detailed roofs with stairs and slabs, windows, a door, some lighting and simple furniture inside. Prefer few big ops over many single blocks.",
 ].join("\n");
 
-export function structurePrompt(request: string, maxSize = MAX_SIZE): string {
-  return `Request: ${request}\n\nMaximum size per side: ${Math.min(MAX_SIZE, Math.max(4, Math.round(maxSize)))} blocks.`;
+const clampLimit = (v: number, max: number) => Math.min(max, Math.max(4, Math.round(v)));
+
+export function structurePrompt(request: string, maxSide = MAX_SIDE, maxHeight = MAX_HEIGHT): string {
+  return `Request: ${request}\n\nMaximum size: ${clampLimit(maxSide, MAX_SIDE)} blocks wide/long (x, z), ${clampLimit(maxHeight, MAX_HEIGHT)} blocks high (y).`;
 }
 
 /** "oak_planks" → "minecraft:oak_planks"; null when it doesn't look like a block state. */
@@ -107,45 +124,99 @@ export function structureId(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "structure";
 }
 
-/** Runs the build ops into a grid, clamped to the size (each side 1..maxSize). */
-export function expandStructure(s: AiStructure, maxSize = MAX_SIZE): ExpandedStructure {
-  const limit = Math.min(MAX_SIZE, Math.max(1, Math.round(maxSize)));
-  const [sx, sy, sz] = s.size.map((n) => Math.min(limit, Math.max(1, n))) as [number, number, number];
-  const grid = new Int32Array(sx * sy * sz); // palette index + 1, 0 = nothing placed
+const KINDS: Record<StructureOpKind, number> = { fill: 0, hollow: 1, walls: 2, set: 3 };
+
+/**
+ * Validates and clamps the build ops to the size (x/z ≤ maxSide, y ≤ maxHeight) and runs them into
+ * a sparse grid — only 16³ sections something was placed in exist — for the block count and, for
+ * small structures, the block list.
+ */
+export function expandStructure(s: AiStructure, maxSide = MAX_SIDE, maxHeight = MAX_HEIGHT): ExpandedStructure {
+  const side = Math.min(MAX_SIDE, Math.max(1, Math.round(maxSide)));
+  const height = Math.min(MAX_HEIGHT, Math.max(1, Math.round(maxHeight)));
+  const limits = [side, height, side];
+  const [sx, sy, sz] = s.size.map((n, a) => Math.min(limits[a], Math.max(1, n))) as [number, number, number];
+  const nx = (sx + 15) >> 4, nz = (sz + 15) >> 4;
+  const sections = new Map<number, Uint16Array>(); // palette index + 1, 0 = nothing placed
   const palette: string[] = [];
   const index = new Map<string, number>();
   const rejected = new Set<string>();
-  const at = (x: number, y: number, z: number) => (y * sz + z) * sx + x;
+  const ops: number[] = [];
+
+  const put = (x: number, y: number, z: number, id: number) => {
+    const key = ((y >> 4) * nz + (z >> 4)) * nx + (x >> 4);
+    let sec = sections.get(key);
+    if (!sec) {
+      if (!id) return; // air where nothing is placed yet
+      if (sections.size >= MAX_SECTIONS) throw new Error("The structure is too big — it fills more of its box than the server can build at once. Ask for something smaller or less solid.");
+      sec = new Uint16Array(4096);
+      sections.set(key, sec);
+    }
+    sec[((y & 15) << 8) | ((z & 15) << 4) | (x & 15)] = id;
+  };
 
   for (const op of s.ops) {
     const block = normalizeBlockState(op.block);
     if (!block) { rejected.add(op.block); continue; }
     let id = 0; // air clears
     if (!isAir(block)) {
-      if (!index.has(block)) { index.set(block, palette.length); palette.push(block); }
+      if (!index.has(block)) {
+        if (palette.length >= 65534) continue;
+        index.set(block, palette.length);
+        palette.push(block);
+      }
       id = index.get(block)! + 1;
     }
     const to = op.op === "set" ? op.from : op.to;
     const lo = [0, 1, 2].map((a) => Math.max(0, Math.min(op.from[a], to[a])));
     const hi = [0, 1, 2].map((a) => Math.min([sx, sy, sz][a] - 1, Math.max(op.from[a], to[a])));
     if (lo.some((v, a) => v > hi[a])) continue;
+    ops.push(KINDS[op.op], lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], id - 1);
     for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) for (let x = lo[0]; x <= hi[0]; x++) {
       const onX = x === lo[0] || x === hi[0], onY = y === lo[1] || y === hi[1], onZ = z === lo[2] || z === hi[2];
-      if (op.op === "hollow") grid[at(x, y, z)] = onX || onY || onZ ? id : 0;
-      else if (op.op === "walls") { if (onX || onZ) grid[at(x, y, z)] = id; }
-      else grid[at(x, y, z)] = id;
+      if (op.op === "hollow") put(x, y, z, onX || onY || onZ ? id : 0);
+      else if (op.op === "walls") { if (onX || onZ) put(x, y, z, id); }
+      else put(x, y, z, id);
     }
   }
 
-  // Compact the palette to what's still in the grid.
-  const used = new Map<number, number>();
-  const outPalette: string[] = [];
+  let blockCount = 0;
+  for (const sec of sections.values()) for (let i = 0; i < 4096; i++) if (sec[i]) blockCount++;
   const blocks: number[] = [];
-  for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) for (let x = 0; x < sx; x++) {
-    const v = grid[at(x, y, z)];
-    if (!v) continue;
-    if (!used.has(v)) { used.set(v, outPalette.length); outPalette.push(palette[v - 1]); }
-    blocks.push(x, y, z, used.get(v)!);
+  if (blockCount <= INLINE_BLOCKS) {
+    const keys = [...sections.keys()].sort((a, b) => a - b);
+    for (const key of keys) {
+      const sec = sections.get(key)!;
+      const bx = (key % nx) << 4, bz = (Math.floor(key / nx) % nz) << 4, by = Math.floor(key / (nx * nz)) << 4;
+      for (let i = 0; i < 4096; i++) if (sec[i]) blocks.push(bx + (i & 15), by + (i >> 8), bz + ((i >> 4) & 15), sec[i] - 1);
+    }
   }
-  return { name: structureId(s.name), description: s.description, size: [sx, sy, sz], palette: outPalette, blocks, rejected: [...rejected].slice(0, 20) };
+  return { name: structureId(s.name), description: s.description, size: [sx, sy, sz], palette, ops, blockCount, blocks, rejected: [...rejected].slice(0, 20) };
+}
+
+// ── Editing an existing structure (/mmb edit <prompt>) ───────────────────────
+
+/** Ops of the existing structure shown to the AI, at most this many (the rest is summarised). */
+const EDIT_CONTEXT_OPS = 4000;
+
+export const STRUCTURE_EDIT_SYSTEM = [
+  STRUCTURE_SYSTEM,
+  "",
+  "EDIT MODE: the structure already exists (its build ops are listed in the request). Reply with ONLY the new ops that",
+  "change it as asked — they run on top of the existing ones, in the same coordinates. Add blocks with fill/hollow/walls/set,",
+  "remove or carve with \"minecraft:air\". Do not repeat the existing ops. The size stays exactly as given (repeat it in `size`);",
+  "everything must fit inside it. Keep `name` as given and describe the change in `description`.",
+].join("\n");
+
+/** The edit request: the structure as it is (size + ops so far), then what to change. */
+export function structureEditPrompt(request: string, base: { name: string; size: [number, number, number]; ops: StructureOp[] }): string {
+  const shown = base.ops.slice(0, EDIT_CONTEXT_OPS);
+  const lines = shown.map((o) => `${o.op} ${o.from.join(",")} ${(o.op === "set" ? o.from : o.to).join(",")} ${o.block}`);
+  const more = base.ops.length > shown.length ? `\n… and ${base.ops.length - shown.length} more ops (not shown).` : "";
+  return [
+    `Existing structure "${base.name}", size [${base.size.join(", ")}] (fixed). Its build ops so far (op from to block):`,
+    lines.join("\n") + more,
+    "",
+    `Change request: ${request}`,
+  ].join("\n");
 }

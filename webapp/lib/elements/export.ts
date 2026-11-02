@@ -13,7 +13,7 @@ import { ELEMENT_KINDS } from "./registry";
 export function writeElementFiles(zip: JSZip, prefix: string, elements: ElementsByKind, exportCtx: ExportContext): void {
   const ctx: ExportContext = {
     ...exportCtx,
-    elementIds: Object.fromEntries(Object.entries(elements).map(([kind, list]) => [kind, list.map((el) => `${exportCtx.modId}:${el.id}`)])),
+    elementIds: { ...exportCtx.elementIds, ...Object.fromEntries(Object.entries(elements).map(([kind, list]) => [kind, list.map((el) => `${exportCtx.modId}:${el.id}`)])) },
   };
   const lang: Record<string, string> = {};
   const tags = new Map<string, Set<string>>();

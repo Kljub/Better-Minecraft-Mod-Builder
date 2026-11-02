@@ -18,7 +18,10 @@ import java.util.function.Supplier;
  * token as "Authorization: Bearer …"; errors come back as the web UI's {"error": "…"} message.
  */
 final class WebApi {
+    // HTTP/1.1: the default (HTTP/2) sends an h2c upgrade on http:// URLs, which Next.js' dev
+    // server answers by closing the connection ("HTTP/1.1 header parser received no bytes").
     private static final HttpClient HTTP = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
@@ -74,8 +77,23 @@ final class WebApi {
         body.addProperty("provider", CompanionConfig.PROVIDER.get());
         body.addProperty("model", CompanionConfig.MODEL.get());
         body.addProperty("maxSize", CompanionConfig.MAX_SIZE.get());
+        body.addProperty("maxHeight", CompanionConfig.MAX_HEIGHT.get());
         if (!CompanionConfig.PROJECT.get().isBlank()) body.addProperty("project", CompanionConfig.PROJECT.get().trim());
         return send(() -> request("/api/mod/structures/generate", Duration.ofMinutes(12))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build());
+    }
+
+    /** /mmb edit: the AI's changes to generation `parent` (its ops, compiled like a generation). */
+    static CompletableFuture<JsonObject> edit(long parent, String prompt) {
+        JsonObject body = new JsonObject();
+        body.addProperty("parent", parent);
+        body.addProperty("prompt", prompt);
+        body.addProperty("provider", CompanionConfig.PROVIDER.get());
+        body.addProperty("model", CompanionConfig.MODEL.get());
+        if (!CompanionConfig.PROJECT.get().isBlank()) body.addProperty("project", CompanionConfig.PROJECT.get().trim());
+        return send(() -> request("/api/mod/structures/edit", Duration.ofMinutes(12))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                 .build());

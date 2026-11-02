@@ -37,7 +37,11 @@ export type FieldDef =
   | (FieldBase & { type: "text"; placeholder?: string; mono?: boolean })
   | (FieldBase & { type: "textarea"; rows?: number; mono?: boolean; placeholder?: string })
   | (FieldBase & { type: "number"; min?: number; max?: number; integer?: boolean })
-  | (FieldBase & { type: "select"; options: SelectOption[] })
+  | (FieldBase & {
+      type: "select"; options: SelectOption[];
+      /** extra options from the project (e.g. its custom effects), appended to `options` */
+      moreOptions?: (ctx: FieldContext, spec: ElementSpec) => SelectOption[];
+    })
   | (FieldBase & { type: "boolean" })
   | (FieldBase & { type: "color" })
   /** pack texture key ("custom/foo.png") picked from the texture library */
@@ -87,6 +91,9 @@ export interface GeneratedFile {
   path: string;
   content: string | Blob;
 }
+
+/** elementIds key for the project's custom effects (namespaced) — effects are no element kind */
+export const EFFECT_IDS_KEY = "mobEffect";
 
 export interface ExportContext {
   modId: string;

@@ -1,7 +1,8 @@
 import { HeartCrack, WandSparkles, Flag, Frame, SquareFunction, Pickaxe } from "lucide-react";
-import type { ElementKindDef, ElementSpec, VersionContext } from "./types";
+import { EFFECT_IDS_KEY, type ElementKindDef, type ElementSpec, type VersionContext } from "./types";
 import { json, str, num, bool, list, opts, titleCase, nameOf, textureFile, tagIf } from "./helpers";
 import { attributeId, type McVersion } from "@/lib/mcVersion";
+import { VANILLA_EFFECT_OPTIONS } from "@/lib/effectRegistry";
 
 /**
  * MCreator element types that are pure datapack/resource-pack content — no
@@ -151,10 +152,19 @@ const ATTRIBUTES = [
   "safe_fall_distance", "fall_damage_multiplier", "block_interaction_range", "entity_interaction_range", "oxygen_bonus",
   "water_movement_efficiency", "submerged_mining_speed", "gravity", "scale", "burning_time",
 ];
-const EFFECT_KINDS = opts(["damage", "protection", "knockback", "ignite", "attribute", "mob_experience"], {
+const EFFECT_KINDS = opts(["damage", "protection", "knockback", "ignite", "attribute", "mob_experience", "effect_on_hit", "effect_on_self"], {
   damage: "Extra attack damage", protection: "Damage protection", knockback: "Extra knockback",
   ignite: "Set target on fire (seconds)", attribute: "Attribute modifier", mob_experience: "Extra XP from mobs",
+  effect_on_hit: "Mob effect on the target when hit (vanilla or custom effect)",
+  effect_on_self: "Mob effect on the wearer while equipped (vanilla or custom effect)",
 });
+const isMobEffect = (e: Record<string, unknown>) => e.kind === "effect_on_hit" || e.kind === "effect_on_self";
+/** effect_on_self re-applies every tick; this short duration makes it run out soon after unequipping. */
+const SELF_EFFECT_SECONDS = 2;
+/** A mob effect that exists: vanilla, or one of the project's custom effects (an unknown id fails the datapack). */
+function knownMobEffect(id: string, { elementIds }: VersionContext): boolean {
+  return VANILLA_EFFECT_OPTIONS.includes(id) || !elementIds || (elementIds[EFFECT_IDS_KEY] ?? []).includes(id);
+}
 
 export const ENCHANTMENT: ElementKindDef = {
   kind: "enchantment",
@@ -179,7 +189,7 @@ export const ENCHANTMENT: ElementKindDef = {
     tradeable: true,
     onRandomLoot: true,
     curse: false,
-    effects: [{ kind: "damage", base: 1, perLevel: 0.5, attribute: "movement_speed", operation: "add_value" }],
+    effects: [{ kind: "damage", base: 1, perLevel: 0.5, attribute: "movement_speed", operation: "add_value", mobEffect: "minecraft:slowness", amplifier: 0, amplifierPerLevel: 0 }],
   }),
   fields: [
     { key: "name", label: "Name", type: "text", placeholder: "Lifesteal" },
@@ -213,11 +223,21 @@ export const ENCHANTMENT: ElementKindDef = {
     { key: "onRandomLoot", label: "On random loot", type: "boolean", half: true },
     {
       key: "effects", label: "Effects", type: "list", itemLabel: "Effect",
-      newItem: () => ({ kind: "damage", base: 1, perLevel: 1, attribute: "movement_speed", operation: "add_value" }),
+      newItem: () => ({ kind: "damage", base: 1, perLevel: 1, attribute: "movement_speed", operation: "add_value", mobEffect: "minecraft:slowness", amplifier: 0, amplifierPerLevel: 0 }),
       fields: [
         { key: "kind", label: "Effect", type: "select", options: EFFECT_KINDS },
-        { key: "base", label: "Amount at level I", type: "number", half: true },
-        { key: "perLevel", label: "… added per extra level", type: "number", half: true },
+        {
+          key: "mobEffect", label: "Which effect", type: "select", when: isMobEffect,
+          options: VANILLA_EFFECT_OPTIONS.map((id) => ({ value: id, label: titleCase(id.slice("minecraft:".length)), group: "Vanilla effects" })),
+          moreOptions: (ctx) => (ctx.elementIds?.[EFFECT_IDS_KEY] ?? [])
+            .map((id) => ({ value: id, label: titleCase(id.slice(id.indexOf(":") + 1)), group: "Custom effects" })),
+        },
+        { key: "base", label: "Amount at level I", type: "number", half: true, when: (e) => !isMobEffect(e) },
+        { key: "perLevel", label: "… added per extra level", type: "number", half: true, when: (e) => !isMobEffect(e) },
+        { key: "base", label: "Duration in seconds at level I", type: "number", min: 0, half: true, when: (e) => e.kind === "effect_on_hit" },
+        { key: "perLevel", label: "… seconds added per extra level", type: "number", min: 0, half: true, when: (e) => e.kind === "effect_on_hit" },
+        { key: "amplifier", label: "Effect level at level I (0 = I)", type: "number", min: 0, max: 255, integer: true, half: true, when: isMobEffect },
+        { key: "amplifierPerLevel", label: "… added per extra level", type: "number", min: 0, integer: true, half: true, when: isMobEffect },
         { key: "attribute", label: "Attribute", type: "select", half: true, options: opts(ATTRIBUTES, Object.fromEntries(ATTRIBUTES.map((a) => [a, `minecraft:${a}`]))), when: (e) => e.kind === "attribute" },
         { key: "operation", label: "Operation", type: "select", half: true, when: (e) => e.kind === "attribute", options: opts(["add_value", "add_multiplied_base", "add_multiplied_total"], { add_value: "Add", add_multiplied_base: "Add × base (%)", add_multiplied_total: "Multiply total (%)" }) },
       ],
@@ -232,6 +252,9 @@ export const ENCHANTMENT: ElementKindDef = {
     }
     if (list(spec, "slots").length === 0) problems.push("Pick at least one slot, or the enchantment never takes effect.");
     if (list(spec, "effects").length === 0) problems.push("No effects — the enchantment would do nothing.");
+    for (const e of list<Record<string, unknown>>(spec, "effects")) {
+      if (isMobEffect(e) && !knownMobEffect(String(e.mobEffect || ""), ctx)) problems.push(`Mob effect ${e.mobEffect || "(none)"} no longer exists — that effect is left out of the export.`);
+    }
     for (const id of missingCustom(exclusiveValues(spec, ctx.modId), ctx)) problems.push(`"Incompatible with" lists ${id}, which no longer exists — it is left out of the export.`);
     return problems;
   },
@@ -258,6 +281,23 @@ export const ENCHANTMENT: ElementKindDef = {
           id: `${modId}:enchantment.${spec.id}.${i}`, operation: e.operation || "add_value",
         }); break;
         case "mob_experience": add("minecraft:mob_experience", { effect: { type: "minecraft:add", value } }); break;
+        case "effect_on_hit":
+        case "effect_on_self": {
+          const mobEffect = String(e.mobEffect || "");
+          if (!knownMobEffect(mobEffect, ctx)) break;
+          const amplifier = linear(Math.max(0, Number(e.amplifier) || 0), Math.max(0, Number(e.amplifierPerLevel) || 0));
+          const duration = e.kind === "effect_on_self" ? SELF_EFFECT_SECONDS : value;
+          const effect = {
+            type: "minecraft:apply_mob_effect", to_apply: mobEffect,
+            min_duration: duration, max_duration: duration, min_amplifier: amplifier, max_amplifier: amplifier,
+          };
+          if (e.kind === "effect_on_self") add("minecraft:tick", { effect });
+          else add("minecraft:post_attack", {
+            affected: "victim", enchanted: "attacker", effect,
+            requirements: { condition: "minecraft:damage_source_properties", predicate: { is_direct: true } },
+          });
+          break;
+        }
       }
     });
     const exclusive = exportedExclusive(spec, ctx);

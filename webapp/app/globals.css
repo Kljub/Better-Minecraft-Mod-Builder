@@ -153,6 +153,14 @@
     @apply font-sans;
     color-scheme: dark;
   }
+  /* native dropdown lists: without this, optgroup headers render white-on-white */
+  select option,
+  select optgroup {
+    @apply bg-popover text-popover-foreground;
+  }
+  select optgroup {
+    @apply text-muted-foreground;
+  }
 }
 /* ── Minecraft GUI look (creative item picker) ── */
 .mc-panel {

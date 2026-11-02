@@ -1,7 +1,7 @@
 import type { RowDataPacket } from "mysql2/promise";
 import { db } from "@/lib/server/db";
 import { requireModUser } from "@/lib/server/modTokens";
-import { MAX_SIZE } from "@/lib/structureAi";
+import { MAX_HEIGHT, MAX_SIDE } from "@/lib/structureAi";
 
 /** Companion mod: "/mmb status" — checks the token and lists the user's projects. */
 export async function GET(request: Request) {
@@ -13,6 +13,7 @@ export async function GET(request: Request) {
     username: user.username,
     projects: rows.map((r) => String(r.project_key)),
     ai: process.env.NODE_ENV === "development",
-    maxSize: MAX_SIZE,
+    maxSide: MAX_SIDE,
+    maxHeight: MAX_HEIGHT,
   });
 }

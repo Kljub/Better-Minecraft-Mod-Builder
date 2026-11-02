@@ -116,17 +116,24 @@ function FieldInput({ field, value, spec, ctx, onChange }: {
         }} />
       );
     }
-    case "select":
+    case "select": {
       // Native select: shows the option's label (the shared PropSelect trigger shows the raw value).
+      const options = [...field.options, ...(field.moreOptions?.(ctx, spec) ?? [])];
+      if (text && !options.some((o) => o.value === text)) options.push({ value: text, label: `${text} (missing)` });
+      const groups = [...new Set(options.map((o) => o.group ?? ""))];
       return (
         <select
-          className="h-7 w-full rounded-sm border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring [&>option]:bg-popover"
+          className="h-7 w-full rounded-sm border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring"
           value={text}
           onChange={(e) => onChange(e.target.value)}
         >
-          {field.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {groups.map((g) => {
+            const items = options.filter((o) => (o.group ?? "") === g).map((o) => <option key={o.value} value={o.value}>{o.label}</option>);
+            return g ? <optgroup key={g} label={g}>{items}</optgroup> : items;
+          })}
         </select>
       );
+    }
     case "color":
       return <HexColorField value={text || "#ffffff"} onChange={onChange} />;
     case "registry":
@@ -225,7 +232,7 @@ function CompactMultiSelect({ options, selected, onChange }: {
       )}
       <select
         aria-label="Add"
-        className="h-7 w-full rounded-sm border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring [&_option]:bg-popover"
+        className="h-7 w-full rounded-sm border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring"
         value=""
         onChange={(e) => e.target.value && onChange([...selected, e.target.value])}
       >

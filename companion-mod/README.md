@@ -21,19 +21,30 @@ Generating needs the web UI's **dev server** (`npm run dev`), because that's whe
 
 | Command | |
 |---|---|
-| `/mmb generate <prompt>` | The AI designs the structure (up to `maxSize` per side, at most 128). It's placed 2 blocks in front of you, with its entrance facing you and the floor at your feet. The `.nbt` is uploaded automatically. |
-| `/mmb undo` | Puts back what was there before your last generation. |
-| `/mmb upload [name]` | Without a selection: uploads your last generated structure **as you edited it**. This is stored as a corrected version of the generation, which makes good training data. |
-| `/mmb pos1 [x y z]` / `/mmb pos2 [x y z]` then `/mmb upload <name>` | Uploads any region, such as something you built by hand. |
+| `/mmb world` / `/mmb leave` | Takes you into the mod's empty build world (all void, one bedrock block at 0 64 0 to stand on) and back to where you were. |
+| `/mmb generate <prompt>` | Only in the build world (config `onlyInBuildWorld`, default on), so the real worlds are never touched. Every structure gets its own fresh plot there (empty void with a bedrock block, plots 2048 blocks apart along +X); you're taken to it right away and the structure appears in front of you. Old plots stay, so you can keep editing them. The AI designs the structure (up to `maxSize` wide/long, at most 1024, and `maxHeight` high, at most 256). It's placed 2 blocks in front of you, with its entrance facing you and the floor at your feet, built over several ticks (25 ms each) so the server keeps running; big builds report their progress. The `.nbt` is uploaded automatically when the structure's box is at most 128³ blocks of space (e.g. 256×32×256); bigger designs stay in the web UI as AI data. |
+| `/mmb edit <prompt>` | Changes an existing structure: stand on its plot (or right after generating) and say what to change, e.g. `/mmb edit add a stone bridge to the east`. The AI sees the structure's build ops so far (generation + earlier edits) and answers only with the changes, built on top — your hand edits stay unless the change covers them. Edits stack; the edited version is uploaded like after /mmb generate. |
+| `/mmb undo` | Puts back what was there before your last generation or edit (for builds bigger than 128³: blocks only, without chest contents). |
+| `/mmb plots` / `/mmb plot <nr>` | Lists the structures in the build world / takes you back to one to edit it. |
+| `/mmb upload [name]` | Without a selection: uploads the structure of the plot you're standing on (else your last generated one) **as you edited it**. This is stored as a corrected version of the generation, which makes good training data. |
+| `/mmb pos1 [x y z]` / `/mmb pos2 [x y z]` then `/mmb upload <name>` | Uploads any region up to 128³ blocks of space (e.g. 256×32×256), such as something you built by hand. |
 | `/mmb project [key]` | Sends structures to one project only. Without a key, they go to whichever project is open in the editor. |
 | `/mmb status` | Shows the connection, the user, and where structures go. |
 
 Command blocks and the console can use the commands too, for example:
-`/execute positioned 0 64 0 rotated 180 0 run mmb generate a well`
+`/execute in mmb_companion:build positioned 0 64 0 rotated 180 0 run mmb generate a well`
+
+## On a server (players without the mod)
+
+The mod is server-side only: it adds commands and a datapack dimension, no blocks, items or
+network packets. Players join with an unmodded client by IP. For a server where everyone may
+generate, set `permissionLevel = 0`, `spawnInBuildWorld = true` and keep `onlyInBuildWorld = true` — players build in the
+separate build world and can't change the real one. All generations use the token the server was
+connected with (one web UI account, one project); `/mmb connect` and `/mmb project` always need permission level 3.
 
 ## Config (`config/mmb_companion-common.toml`)
 
-`serverUrl`, `token`, `project`, `provider` (`auto` tries Claude, then Codex), `model` (optional) and `maxSize` (4–128, default 48).
+`serverUrl`, `token`, `project`, `provider` (`auto` tries Claude, then Codex), `model` (optional), `maxSize` (width/length, 4–1024, default 48), `maxHeight` (4–256, default 48), `onlyInBuildWorld` (default true), `spawnInBuildWorld` (players land on the bedrock block when they join or respawn, default false) and `permissionLevel` (who may use /mmb: 0 everyone … 4 owners, default 2 = operators).
 
 ## Versions
 
